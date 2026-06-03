@@ -14,3 +14,6 @@ build/
 node_modules/
 .next/
 frontend/.env.local
+
+# Local UI design mockups (not part of the app)
+mockups/

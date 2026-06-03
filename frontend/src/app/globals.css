@@ -4,6 +4,31 @@
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-ink text-slate-100 antialiased;
+    font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  /* Subtle glow, reserved for hero numbers (e.g. recovery score) only. */
+  .glow-recovery {
+    text-shadow: 0 0 18px rgba(52, 211, 153, 0.55);
+  }
+}
+
+/* Respect users who prefer reduced motion (accessibility). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
   }
 }
