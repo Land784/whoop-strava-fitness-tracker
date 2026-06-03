@@ -165,10 +165,12 @@ When creating or modifying models, explain the SQLAlchemy ORM concepts involved
   For integration questions, see `docs/strava-api.md`.
 - **WHOOP:** base URL `https://api.prod.whoop.com/developer/v1`. OAuth2 PKCE
   flow. For integration questions, see `docs/whoop-api.md`.
-- **Claude:** use `claude-sonnet-4-20250514`. Stream responses for the chat
-  endpoint; non-streaming for plan generation. System prompt lives in
-  `services/claude.py` — always include the user's recent workout load and
-  latest recovery score as context.
+- **Claude:** model id lives in `settings.claude_model` (currently
+  `claude-sonnet-4-6`) — don't hardcode it at call sites. Use `AsyncAnthropic`
+  with `await` so calls don't block the event loop. Stream responses for the
+  chat endpoint; non-streaming for plan generation (streaming not yet wired).
+  System prompt lives in `services/claude.py` — always include the user's recent
+  workout load and latest recovery score as context.
 
 When touching any external API integration, explain the authentication model
 being used (OAuth2, API key, etc.) and why it works the way it does.

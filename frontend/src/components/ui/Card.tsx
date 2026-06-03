@@ -6,10 +6,12 @@ interface CardProps {
 
 export default function Card({ title, children, className = "" }: CardProps) {
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 shadow-sm ${className}`}>
+    <div className={`bg-panel rounded-2xl border border-line ${className}`}>
       {title && (
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{title}</h2>
+        <div className="px-6 py-4 border-b border-line">
+          <h2 className="font-display text-sm font-semibold text-slate-300 uppercase tracking-wide">
+            {title}
+          </h2>
         </div>
       )}
       <div className="p-6">{children}</div>
@@ -21,7 +23,7 @@ export function StatCard({
   label,
   value,
   unit,
-  color = "text-brand-600",
+  color = "text-emerald-400",
 }: {
   label: string;
   value: string | number | null | undefined;
@@ -29,12 +31,12 @@ export function StatCard({
   color?: string;
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${color}`}>
+    <div className="bg-panel rounded-2xl border border-line p-5">
+      <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">{label}</p>
+      <p className={`font-display text-2xl font-bold ${color}`}>
         {value ?? "—"}
         {value != null && unit && (
-          <span className="text-sm font-normal text-gray-500 ml-1">{unit}</span>
+          <span className="text-sm font-normal text-slate-500 ml-1">{unit}</span>
         )}
       </p>
     </div>

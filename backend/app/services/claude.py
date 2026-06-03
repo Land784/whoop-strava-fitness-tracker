@@ -40,8 +40,11 @@ async def get_insights(question: str, user: User, db: AsyncSession) -> str:
         )
     ).scalars().all()
 
+    # No TSS here: we don't compute it yet, so "tss=None" would just mislead the
+    # model. Describe load with the fields we actually have from Strava.
     workout_ctx = "\n".join(
-        f"- {w.type or 'Unknown'} on {w.date}: tss={w.tss}, dist={w.distance_meters}m, avg_hr={w.avg_hr}"
+        f"- {w.type or 'Unknown'} on {w.date}: "
+        f"{w.duration_seconds}s, dist={w.distance_meters}m, avg_hr={w.avg_hr}"
         for w in workouts
     ) or "No recent workouts."
 
@@ -59,9 +62,11 @@ async def get_insights(question: str, user: User, db: AsyncSession) -> str:
         f"Recent recovery (last 7 days):\n{recovery_ctx}"
     )
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    # AsyncAnthropic + await: the network call yields control back to the event
+    # loop instead of blocking the whole server while Claude responds.
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model=settings.claude_model,
         max_tokens=512,
         system=system,
         messages=[{"role": "user", "content": question}],
@@ -92,32 +97,43 @@ async def generate_training_plan(week_start: str, user: User, db: AsyncSession) 
         )
     ).scalars().all()
 
-    avg_tss = (
-        sum(w.tss for w in recent_workouts if w.tss) / len(recent_workouts)
-        if recent_workouts else 0
+    # Summarise recent load *without* TSS (not computed yet): how many workouts,
+    # typical duration, and total distance over the two-week window.
+    n_workouts = len(recent_workouts)
+    avg_minutes = (
+        sum(w.duration_seconds for w in recent_workouts if w.duration_seconds)
+        / n_workouts
+        / 60
+        if n_workouts
+        else 0
     )
+    total_km = sum(w.distance_meters for w in recent_workouts if w.distance_meters) / 1000
     avg_recovery = (
         sum(r.whoop_recovery_score for r in recent_recovery if r.whoop_recovery_score)
         / len(recent_recovery)
-        if recent_recovery else 50
+        if recent_recovery
+        else 50
     )
     prompt_summary = (
-        f"2-week avg TSS: {avg_tss:.1f}, 7-day avg recovery: {avg_recovery:.1f}, "
-        f"week starting: {week_start}"
+        f"Last 14 days: {n_workouts} workouts, ~{avg_minutes:.0f} min each, "
+        f"{total_km:.0f} km total. 7-day avg recovery: {avg_recovery:.0f}. "
+        f"Week starting: {week_start}"
     )
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model=settings.claude_model,
         max_tokens=1024,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Generate a 7-day training plan for the week starting {week_start}. "
-                f"Context: {prompt_summary}. "
-                "Return a JSON object with keys 'days' (array of daily plans) and 'summary'."
-            ),
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Generate a 7-day training plan for the week starting {week_start}. "
+                    f"Context: {prompt_summary}. "
+                    "Return a JSON object with keys 'days' (array of daily plans) and 'summary'."
+                ),
+            }
+        ],
     )
 
     plan = TrainingPlan(

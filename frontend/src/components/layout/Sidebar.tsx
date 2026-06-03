@@ -45,6 +45,17 @@ const nav = [
       </svg>
     ),
   },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar() {
@@ -52,10 +63,18 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="w-64 min-h-screen bg-gray-900 text-white flex flex-col">
-      <div className="px-6 py-5 border-b border-gray-700">
-        <h1 className="text-lg font-bold text-white">FitTracker</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Whoop + Strava</p>
+    <aside className="w-64 min-h-screen bg-[#080B14] border-r border-line flex flex-col">
+      <div className="px-6 py-5 border-b border-line flex items-center gap-3">
+        <div className="h-9 w-9 rounded-xl bg-emerald-400/15 grid place-items-center">
+          <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="font-display text-[15px] font-bold text-white leading-tight">FitTracker</h1>
+          <p className="text-[11px] text-slate-500">Whoop + Strava</p>
+        </div>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -65,10 +84,10 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors duration-200 ${
                 active
-                  ? "bg-brand-600 text-white"
-                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                  ? "bg-emerald-400/10 text-emerald-400"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-100"
               }`}
             >
               {icon}
@@ -78,11 +97,14 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-4 py-4 border-t border-gray-700">
-        <p className="text-xs text-gray-400 truncate mb-2">{user?.email}</p>
+      <div className="px-4 py-4 border-t border-line">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-sky-400 shrink-0" />
+          <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+        </div>
         <button
           onClick={logout}
-          className="w-full text-left text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-2"
+          className="w-full text-left text-sm text-slate-400 hover:text-slate-100 transition-colors duration-200 flex items-center gap-2 cursor-pointer"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

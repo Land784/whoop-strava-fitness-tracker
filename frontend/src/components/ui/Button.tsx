@@ -7,10 +7,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  primary: "bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500",
-  secondary: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-gray-400",
-  danger: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500",
-  ghost: "bg-transparent text-gray-600 hover:bg-gray-100 focus:ring-gray-400",
+  primary: "bg-emerald-400 text-[#04130C] hover:bg-emerald-300 focus:ring-emerald-400",
+  secondary: "bg-white/5 text-slate-200 border border-line hover:bg-white/10 focus:ring-slate-500",
+  danger: "bg-rose-500 text-white hover:bg-rose-400 focus:ring-rose-500",
+  ghost: "bg-transparent text-slate-400 hover:bg-white/5 focus:ring-slate-500",
 };
 
 const sizes = {
@@ -30,8 +30,8 @@ export default function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium
-        focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors
+      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium cursor-pointer
+        focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ink transition-colors duration-200
         disabled:opacity-50 disabled:cursor-not-allowed
         ${variants[variant]} ${sizes[size]} ${className}`}
       disabled={disabled || loading}
