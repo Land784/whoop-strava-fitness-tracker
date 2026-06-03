@@ -1,5 +1,5 @@
 import { request } from "@/lib/http";
-import type { Token, User } from "@/types";
+import type { ConnectionStatus, Token, User } from "@/types";
 
 export const authApi = {
   register: (email: string, password: string) =>
@@ -13,4 +13,12 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+
+  // Which providers the current user has connected (booleans, no tokens).
+  getConnections: () => request<ConnectionStatus>("/auth/connections"),
+
+  // Returns the Strava authorize URL (with our signed `state`). The caller does
+  // a full-page redirect to it — see the Settings page.
+  getStravaAuthorizeUrl: () =>
+    request<{ authorization_url: string }>("/auth/strava/authorize"),
 };

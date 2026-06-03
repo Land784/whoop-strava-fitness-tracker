@@ -9,6 +9,11 @@ export interface Token {
   token_type: string;
 }
 
+export interface ConnectionStatus {
+  strava_connected: boolean;
+  whoop_connected: boolean;
+}
+
 export interface Workout {
   id: number;
   user_id: number;
