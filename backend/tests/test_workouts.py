@@ -6,6 +6,8 @@ Each test covers one scenario. The three scenarios every endpoint needs:
   - User isolation: user A's data is invisible to user B.
 """
 
+from datetime import date
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +35,7 @@ async def test_create_workout(client: AsyncClient, auth_headers: dict):
 
 async def test_list_workouts(client: AsyncClient, auth_headers: dict, db: AsyncSession, user: User):
     # Seed a workout directly so we're not testing create via list
-    db.add(Workout(user_id=user.id, type="Ride", date="2024-01-10", tss=80.0))
+    db.add(Workout(user_id=user.id, type="Ride", date=date(2024, 1, 10), tss=80.0))
     await db.commit()
 
     resp = await client.get("/workouts/", headers=auth_headers)
@@ -66,7 +68,7 @@ async def test_user_cannot_see_other_users_workouts(
     await db.commit()
     await db.refresh(user_b)
 
-    db.add(Workout(user_id=user_b.id, type="Swim", date="2024-01-12"))
+    db.add(Workout(user_id=user_b.id, type="Swim", date=date(2024, 1, 12)))
     await db.commit()
 
     # Request as user A
@@ -85,7 +87,7 @@ async def test_user_cannot_delete_other_users_workout(
     await db.commit()
     await db.refresh(user_b)
 
-    workout = Workout(user_id=user_b.id, type="Swim", date="2024-01-13")
+    workout = Workout(user_id=user_b.id, type="Swim", date=date(2024, 1, 13))
     db.add(workout)
     await db.commit()
     await db.refresh(workout)

@@ -12,7 +12,6 @@ Every fixture marked `async` needs `@pytest.mark.asyncio` or the
 `asyncio_mode = "auto"` setting in pytest.ini / pyproject.toml.
 """
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -28,14 +27,15 @@ from app.models.user import User
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def engine():
+    # Function-scoped: drop + recreate all tables for every test so committed
+    # rows from one test can't leak into the next (e.g. the test user's email).
     _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with _engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield _engine
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
     await _engine.dispose()
 
 

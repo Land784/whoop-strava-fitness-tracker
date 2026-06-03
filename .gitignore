@@ -20,3 +20,9 @@ mockups/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+#handoff documents for claude code
+handoffs/
+
+# pytest SQLite database artifact
+test.db
