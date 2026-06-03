@@ -17,3 +17,6 @@ frontend/.env.local
 
 # Local UI design mockups (not part of the app)
 mockups/
+
+# TypeScript incremental build cache
+*.tsbuildinfo

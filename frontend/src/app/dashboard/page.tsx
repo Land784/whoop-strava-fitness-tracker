@@ -10,6 +10,7 @@
 
 import { recoveryApi } from "@/api/recovery";
 import { workoutsApi } from "@/api/workouts";
+import { formatDuration, formatMiles, formatPace } from "@/lib/format";
 import Sidebar from "@/components/layout/Sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,7 +35,7 @@ export default function DashboardPage() {
 
   const { data: workouts = [] } = useQuery({
     queryKey: ["workouts"],
-    queryFn: () => workoutsApi.list(0, 5),
+    queryFn: () => workoutsApi.list(0, 10),
     enabled: !!user,
   });
 
@@ -169,16 +170,17 @@ export default function DashboardPage() {
                         <p className="text-sm font-semibold text-slate-100">{w.type ?? "Workout"}</p>
                         <p className="text-xs text-slate-500">
                           {w.date ?? "—"}
-                          {w.duration_seconds != null && ` · ${Math.round(w.duration_seconds / 60)} min`}
+                          {w.duration_seconds != null && ` · ${formatDuration(w.duration_seconds)}`}
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <p className="font-display text-sm font-semibold text-slate-100">
-                        {w.distance_meters ? `${(w.distance_meters / 1000).toFixed(1)} km` : "—"}
+                        {formatMiles(w.distance_meters)}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {w.avg_hr ? `avg ${w.avg_hr} bpm` : "—"}
+                        {formatPace(w.distance_meters, w.duration_seconds)}
+                        {w.avg_hr ? ` · ${w.avg_hr} bpm` : ""}
                       </p>
                     </div>
                   </div>
