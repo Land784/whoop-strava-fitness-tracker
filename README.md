@@ -161,26 +161,79 @@ Full interactive docs: **http://localhost:8000/docs**
 
 ---
 
-## Local development (without Docker)
+## Local development (app on host, Postgres in Docker)
 
-### Backend
+The fastest inner loop: run **Postgres in Docker** but the **backend and
+frontend directly on your machine**, for instant reloads and readable logs.
+(The full-Docker [Quick start](#quick-start) above is the alternative.)
+
+### One-time setup
+
+**1. Point `DATABASE_URL` at `localhost`.** The committed `.env` uses host `db`
+— the Compose service name, which only resolves *inside* the Docker network.
+For host-local runs it must be `localhost`:
+
+```
+DATABASE_URL=postgresql+asyncpg://fituser:changeme@localhost:5432/fitness_tracker
+```
+
+> Switch it back to `db` if you later run the full `docker-compose up`.
+
+**2. Start only the database:**
+
+```bash
+docker compose up -d db
+```
+
+**3. Create the backend virtualenv (Python 3.12+):**
 
 ```bash
 cd backend
-uvicorn app.main:app --reload        # dev server on :8000
-pytest                                # run tests
-alembic upgrade head                  # apply migrations
-ruff check . && ruff format .         # lint + format
+python3.12 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
 ```
 
-### Frontend
+### Running the backend
+
+`.env` lives at the **repo root**, but Pydantic's `env_file=".env"` resolves
+relative to your current directory — so running from `backend/` won't find it.
+Export it into the shell first (real env vars take precedence over the file):
+
+```bash
+cd backend
+set -a && source ../.env && set +a    # load root .env into the shell
+
+./.venv/bin/alembic upgrade head                              # first run only
+./.venv/bin/uvicorn app.main:app --reload --reload-dir app --port 8000
+```
+
+> **Why `--reload-dir app`?** The virtualenv lives under `backend/`, so a bare
+> `--reload` watches all of `site-packages` and thrashes on every dependency
+> file. Scoping the watcher to `app/` keeps reloads fast and relevant.
+
+### Running the frontend
+
+In a second terminal:
 
 ```bash
 cd frontend
-npm install
-npm run dev      # dev server on :3000
-npm run build    # production build
-npm run lint     # ESLint
+npm install     # first run only
+npm run dev     # :3000
+```
+
+Open **http://localhost:3000** and register an account.
+
+### Other commands
+
+```bash
+# Backend (from backend/, with .env exported as above)
+./.venv/bin/pytest                       # run tests
+./.venv/bin/ruff check . && ./.venv/bin/ruff format .   # lint + format
+
+# Frontend (from frontend/)
+npm run build       # production build
+npm run lint        # ESLint
+npm run typecheck   # tsc --noEmit
 ```
 
 ---
