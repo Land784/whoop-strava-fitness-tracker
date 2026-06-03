@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     # AI
     anthropic_api_key: str = ""
+    # Centralised so the model can be bumped in one place (or overridden via
+    # env) instead of being hardcoded at each call site.
+    claude_model: str = "claude-sonnet-4-6"
 
     # Token encryption — Fernet key for encrypting OAuth tokens at rest.
     # Intentionally required (no default): the app should refuse to start rather
