@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.security import decrypt_token, encrypt_token
 from app.models.user import User
 from app.models.workout import Workout
 
@@ -37,14 +38,19 @@ async def exchange_code(code: str, user: User, db: AsyncSession) -> None:
         raise ValueError(f"Strava token exchange failed: {resp.text}")
 
     data = resp.json()
-    # Tokens should be encrypted at rest in production — see core/security.py
-    user.strava_access_token = data["access_token"]
-    user.strava_refresh_token = data["refresh_token"]
+    # Encrypt before persisting — the DB only ever holds ciphertext. We decrypt
+    # only at the moment we actually call Strava (see sync/refresh below).
+    user.strava_access_token = encrypt_token(data["access_token"])
+    user.strava_refresh_token = encrypt_token(data["refresh_token"])
     await db.commit()
 
 
 async def refresh_token(user: User, db: AsyncSession) -> str:
-    """Refresh the Strava access token using the stored refresh token."""
+    """Refresh the Strava access token using the stored refresh token.
+
+    Returns the new *plaintext* access token so the caller can use it
+    immediately; the copy we persist is encrypted.
+    """
     if not user.strava_refresh_token:
         raise ValueError("No Strava refresh token stored for this user")
 
@@ -54,7 +60,8 @@ async def refresh_token(user: User, db: AsyncSession) -> str:
             data={
                 "client_id": settings.strava_client_id,
                 "client_secret": settings.strava_client_secret,
-                "refresh_token": user.strava_refresh_token,
+                # Decrypt only to hand it back to Strava in this request.
+                "refresh_token": decrypt_token(user.strava_refresh_token),
                 "grant_type": "refresh_token",
             },
         )
@@ -63,8 +70,8 @@ async def refresh_token(user: User, db: AsyncSession) -> str:
         raise ValueError("Strava token refresh failed")
 
     data = resp.json()
-    user.strava_access_token = data["access_token"]
-    user.strava_refresh_token = data["refresh_token"]
+    user.strava_access_token = encrypt_token(data["access_token"])
+    user.strava_refresh_token = encrypt_token(data["refresh_token"])
     await db.commit()
     return data["access_token"]
 
@@ -75,10 +82,13 @@ async def sync_activities(user: User, db: AsyncSession) -> int:
     if not user.strava_access_token:
         raise ValueError("User has not connected Strava")
 
+    # Decrypt the stored token only for the lifetime of this request.
+    access = decrypt_token(user.strava_access_token)
+
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{STRAVA_API_BASE}/athlete/activities",
-            headers={"Authorization": f"Bearer {user.strava_access_token}"},
+            headers={"Authorization": f"Bearer {access}"},
             params={"per_page": 30},
         )
 
