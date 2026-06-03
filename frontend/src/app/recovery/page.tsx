@@ -14,10 +14,10 @@ const today = new Date().toISOString().split("T")[0];
 const emptyForm: RecoveryCreate = { date: today };
 
 function scoreColor(score: number | null): string {
-  if (score == null) return "text-gray-400";
-  if (score >= 67) return "text-green-600";
-  if (score >= 34) return "text-yellow-500";
-  return "text-red-500";
+  if (score == null) return "text-slate-500";
+  if (score >= 67) return "text-emerald-400";
+  if (score >= 34) return "text-amber-400";
+  return "text-rose-400";
 }
 
 export default function RecoveryPage() {
@@ -31,9 +31,10 @@ export default function RecoveryPage() {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
 
+  // Arrow wrapper keeps `records` typed as RecoveryScore[] (see workouts page).
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["recovery"],
-    queryFn: recoveryApi.list,
+    queryFn: () => recoveryApi.list(),
     enabled: !!user,
   });
 
@@ -67,8 +68,8 @@ export default function RecoveryPage() {
       <main className="flex-1 p-8 max-w-5xl">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Recovery</h1>
-            <p className="text-gray-500 text-sm mt-0.5">{records.length} days logged</p>
+            <h1 className="font-display text-2xl font-bold text-white">Recovery</h1>
+            <p className="text-slate-500 text-sm mt-0.5">{records.length} days logged</p>
           </div>
           <Button onClick={() => setShowForm((s) => !s)}>
             {showForm ? "Cancel" : "+ Log today"}
@@ -79,7 +80,7 @@ export default function RecoveryPage() {
           <Card title="New recovery entry" className="mb-8">
             <form onSubmit={handleCreate} className="grid grid-cols-2 gap-4">
               {createMutation.isError && (
-                <div className="col-span-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+                <div className="col-span-2 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-lg px-4 py-2">
                   {(createMutation.error as Error).message}
                 </div>
               )}
@@ -91,14 +92,14 @@ export default function RecoveryPage() {
                 { label: "Sleep score (%)", key: "sleep_score", type: "number", placeholder: "85" },
               ].map(({ label, key, type, placeholder, step }) => (
                 <div key={key}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
                   <input
                     type={type}
                     step={step}
                     placeholder={placeholder}
                     value={(form[key as keyof RecoveryCreate] as string | undefined) ?? ""}
                     onChange={(e) => field(key as keyof RecoveryCreate, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-line text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400/60 focus:border-transparent transition-colors"
                   />
                 </div>
               ))}
@@ -110,29 +111,29 @@ export default function RecoveryPage() {
         )}
 
         {isLoading ? (
-          <p className="text-gray-400 text-sm">Loading…</p>
+          <p className="text-slate-500 text-sm">Loading…</p>
         ) : records.length === 0 ? (
-          <p className="text-gray-400 text-sm">No recovery data yet.</p>
+          <p className="text-slate-500 text-sm">No recovery data yet. Connect WHOOP and Sync, or log a day manually.</p>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-panel rounded-2xl border border-line overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-white/5 border-b border-line">
                 <tr>
                   {["Date", "Score", "HRV", "Resting HR", "Sleep"].map((h) => (
-                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line">
                 {records.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-gray-900">{r.date}</td>
+                  <tr key={r.id} className="hover:bg-white/5 transition-colors">
+                    <td className="px-5 py-3 font-medium text-slate-100">{r.date}</td>
                     <td className={`px-5 py-3 font-bold ${scoreColor(r.whoop_recovery_score)}`}>
                       {r.whoop_recovery_score?.toFixed(0) ?? "—"}
                     </td>
-                    <td className="px-5 py-3 text-gray-700">{r.hrv_ms?.toFixed(1) ?? "—"} <span className="text-gray-400 text-xs">ms</span></td>
-                    <td className="px-5 py-3 text-gray-700">{r.resting_hr ?? "—"} <span className="text-gray-400 text-xs">bpm</span></td>
-                    <td className="px-5 py-3 text-gray-700">{r.sleep_score?.toFixed(0) ?? "—"}<span className="text-gray-400 text-xs">%</span></td>
+                    <td className="px-5 py-3 text-slate-300">{r.hrv_ms?.toFixed(1) ?? "—"} <span className="text-slate-500 text-xs">ms</span></td>
+                    <td className="px-5 py-3 text-slate-300">{r.resting_hr ?? "—"} <span className="text-slate-500 text-xs">bpm</span></td>
+                    <td className="px-5 py-3 text-slate-300">{r.sleep_score?.toFixed(0) ?? "—"}<span className="text-slate-500 text-xs">%</span></td>
                   </tr>
                 ))}
               </tbody>

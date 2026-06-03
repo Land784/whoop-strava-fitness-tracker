@@ -23,11 +23,11 @@ export default function WorkoutsPage() {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
 
-  // useQuery caches the result under the key ["workouts"]. Any mutation
-  // that invalidates this key will trigger an automatic background refetch.
+  // Wrap the call in an arrow so React Query's context arg isn't passed as
+  // `skip` — that keeps `workouts` correctly typed as Workout[].
   const { data: workouts = [], isLoading } = useQuery({
     queryKey: ["workouts"],
-    queryFn: workoutsApi.list,
+    queryFn: () => workoutsApi.list(),
     enabled: !!user,
   });
 
@@ -73,8 +73,8 @@ export default function WorkoutsPage() {
       <main className="flex-1 p-8 max-w-5xl">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Workouts</h1>
-            <p className="text-gray-500 text-sm mt-0.5">{workouts.length} total</p>
+            <h1 className="font-display text-2xl font-bold text-white">Workouts</h1>
+            <p className="text-slate-500 text-sm mt-0.5">{workouts.length} total</p>
           </div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => syncMutation.mutate()} loading={syncMutation.isPending}>
@@ -90,7 +90,7 @@ export default function WorkoutsPage() {
           <Card title="New workout" className="mb-8">
             <form onSubmit={handleCreate} className="grid grid-cols-2 gap-4">
               {createMutation.isError && (
-                <div className="col-span-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+                <div className="col-span-2 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-lg px-4 py-2">
                   {(createMutation.error as Error).message}
                 </div>
               )}
@@ -103,14 +103,14 @@ export default function WorkoutsPage() {
                 { label: "TSS", key: "tss", type: "number", placeholder: "65.0", step: "0.1" },
               ].map(({ label, key, type, placeholder, step }) => (
                 <div key={key}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
                   <input
                     type={type}
                     step={step}
                     placeholder={placeholder}
                     value={(form[key as keyof WorkoutCreate] as string | undefined) ?? ""}
                     onChange={(e) => field(key as keyof WorkoutCreate, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-line text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400/60 focus:border-transparent transition-colors"
                   />
                 </div>
               ))}
@@ -122,33 +122,33 @@ export default function WorkoutsPage() {
         )}
 
         {isLoading ? (
-          <p className="text-gray-400 text-sm">Loading…</p>
+          <p className="text-slate-500 text-sm">Loading…</p>
         ) : workouts.length === 0 ? (
-          <p className="text-gray-400 text-sm">No workouts yet. Log your first one above.</p>
+          <p className="text-slate-500 text-sm">No workouts yet. Log one above, or connect Strava in Settings and Sync.</p>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-panel rounded-2xl border border-line overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-white/5 border-b border-line">
                 <tr>
                   {["Type", "Date", "TSS", "Distance", "Avg HR", ""].map((h) => (
-                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line">
                 {workouts.map((w) => (
-                  <tr key={w.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-gray-900">{w.type ?? "—"}</td>
-                    <td className="px-5 py-3 text-gray-500">{w.date ?? "—"}</td>
-                    <td className="px-5 py-3 text-brand-600 font-semibold">{w.tss?.toFixed(1) ?? "—"}</td>
-                    <td className="px-5 py-3 text-gray-700">
+                  <tr key={w.id} className="hover:bg-white/5 transition-colors">
+                    <td className="px-5 py-3 font-medium text-slate-100">{w.type ?? "—"}</td>
+                    <td className="px-5 py-3 text-slate-500">{w.date ?? "—"}</td>
+                    <td className="px-5 py-3 text-emerald-400 font-semibold">{w.tss?.toFixed(1) ?? "—"}</td>
+                    <td className="px-5 py-3 text-slate-300">
                       {w.distance_meters ? `${(w.distance_meters / 1000).toFixed(1)} km` : "—"}
                     </td>
-                    <td className="px-5 py-3 text-gray-700">{w.avg_hr ?? "—"}</td>
+                    <td className="px-5 py-3 text-slate-300">{w.avg_hr ?? "—"}</td>
                     <td className="px-5 py-3 text-right">
                       <button
                         onClick={() => deleteMutation.mutate(w.id)}
-                        className="text-red-400 hover:text-red-600 text-xs transition-colors"
+                        className="text-rose-400 hover:text-rose-300 text-xs transition-colors cursor-pointer"
                       >
                         Delete
                       </button>
