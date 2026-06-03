@@ -23,3 +23,11 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     user_id: str | None = None
+
+
+class ConnectionStatus(BaseModel):
+    """Which external providers the user has connected. Booleans only — we never
+    expose the stored tokens themselves in an API response."""
+
+    strava_connected: bool
+    whoop_connected: bool

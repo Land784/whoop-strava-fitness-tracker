@@ -13,7 +13,7 @@ from app.core.security import (
 )
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.user import Token, UserCreate, UserOut
+from app.schemas.user import ConnectionStatus, Token, UserCreate, UserOut
 from app.services import strava as strava_svc
 from app.services import whoop as whoop_svc
 
@@ -44,6 +44,20 @@ async def login(payload: UserCreate, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     return Token(access_token=create_access_token(str(user.id)))
+
+
+@router.get("/connections", response_model=ConnectionStatus)
+async def get_connections(current_user: User = Depends(get_current_user)):
+    """Report which providers the current user has connected.
+
+    Returns booleans only — never the tokens. The frontend uses this to decide
+    whether to show a "Connect" button or a "Connected" badge. A token being
+    present (not None) is our definition of "connected".
+    """
+    return ConnectionStatus(
+        strava_connected=current_user.strava_access_token is not None,
+        whoop_connected=current_user.whoop_access_token is not None,
+    )
 
 
 # ── Strava OAuth ──────────────────────────────────────────────────────────────
