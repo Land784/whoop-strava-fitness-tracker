@@ -14,7 +14,13 @@ python-dotenv==1.0.1
 
 # Auth
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+# passlib 1.7.4 (2020, unmaintained) breaks on bcrypt >= 4.1: its backend
+# self-test hashes a >72-byte string, which newer bcrypt raises on instead of
+# truncating. Pin bcrypt to the last compatible release so password hashing
+# works. Longer term, consider moving off passlib (e.g. `pwdlib`, or calling
+# the `bcrypt` package directly) since passlib is no longer maintained.
+passlib==1.7.4
+bcrypt==4.0.1
 python-multipart==0.0.9
 
 # External API calls — AsyncClient so we don't block the event loop
