@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 export default function SettingsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState<"strava" | "whoop" | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -23,17 +23,20 @@ export default function SettingsPage() {
     enabled: !!user,
   });
 
-  async function handleConnectStrava() {
+  async function handleConnect(provider: "strava" | "whoop") {
     setError("");
-    setConnecting(true);
+    setConnecting(provider);
     try {
       // 1) ask our backend for the authorize URL (carries our signed `state`)
-      const { authorization_url } = await authApi.getStravaAuthorizeUrl();
-      // 2) hand the *browser* over to Strava — this is a navigation, not a fetch
+      const { authorization_url } =
+        provider === "strava"
+          ? await authApi.getStravaAuthorizeUrl()
+          : await authApi.getWhoopAuthorizeUrl();
+      // 2) hand the *browser* over to the provider — a navigation, not a fetch
       window.location.href = authorization_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Strava connection");
-      setConnecting(false);
+      setError(err instanceof Error ? err.message : `Could not start ${provider} connection`);
+      setConnecting(null);
     }
   }
 
@@ -76,11 +79,11 @@ export default function SettingsPage() {
                   </span>
                 ) : (
                   <button
-                    onClick={handleConnectStrava}
-                    disabled={connecting}
+                    onClick={() => handleConnect("strava")}
+                    disabled={connecting === "strava"}
                     className="px-4 py-1.5 rounded-lg bg-emerald-400 text-[#04130C] text-sm font-semibold hover:bg-emerald-300 transition-colors duration-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {connecting ? "Redirecting…" : "Connect"}
+                    {connecting === "strava" ? "Redirecting…" : "Connect"}
                   </button>
                 )
               }
@@ -103,9 +106,13 @@ export default function SettingsPage() {
                     Manage
                   </span>
                 ) : (
-                  <span className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-500 text-xs font-medium border border-line">
-                    Coming soon
-                  </span>
+                  <button
+                    onClick={() => handleConnect("whoop")}
+                    disabled={connecting === "whoop"}
+                    className="px-4 py-1.5 rounded-lg bg-emerald-400 text-[#04130C] text-sm font-semibold hover:bg-emerald-300 transition-colors duration-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {connecting === "whoop" ? "Redirecting…" : "Connect"}
+                  </button>
                 )
               }
             />

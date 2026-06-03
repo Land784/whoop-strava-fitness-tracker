@@ -17,8 +17,11 @@ export const authApi = {
   // Which providers the current user has connected (booleans, no tokens).
   getConnections: () => request<ConnectionStatus>("/auth/connections"),
 
-  // Returns the Strava authorize URL (with our signed `state`). The caller does
+  // Returns a provider authorize URL (with our signed `state`). The caller does
   // a full-page redirect to it — see the Settings page.
   getStravaAuthorizeUrl: () =>
     request<{ authorization_url: string }>("/auth/strava/authorize"),
+
+  getWhoopAuthorizeUrl: () =>
+    request<{ authorization_url: string }>("/auth/whoop/authorize"),
 };

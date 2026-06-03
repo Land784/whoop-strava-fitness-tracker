@@ -163,8 +163,13 @@ When creating or modifying models, explain the SQLAlchemy ORM concepts involved
 - **Strava:** base URL `https://www.strava.com/api/v3`. Rate limit: 100
   req/15 min, 1000/day. Token refresh is automatic in `services/strava.py`.
   For integration questions, see `docs/strava-api.md`.
-- **WHOOP:** base URL `https://api.prod.whoop.com/developer/v1`. OAuth2 PKCE
-  flow. For integration questions, see `docs/whoop-api.md`.
+- **WHOOP:** base URL `https://api.prod.whoop.com/developer/v2` (v1 is
+  deprecated). OAuth2 **confidential-client** flow (uses `client_secret`) with a
+  signed `state` token for CSRF/identity — **not** PKCE. Request the `offline`
+  scope to receive a refresh token (access tokens expire ~hourly; sync refreshes
+  on a 401). Recovery score / HRV / resting HR come from `/recovery`; sleep
+  performance from `/activity/sleep`, joined via the recovery's `sleep_id`.
+  Docs: https://developer.whoop.com/api/
 - **Claude:** model id lives in `settings.claude_model` (currently
   `claude-sonnet-4-6`) — don't hardcode it at call sites. Use `AsyncAnthropic`
   with `await` so calls don't block the event loop. Stream responses for the

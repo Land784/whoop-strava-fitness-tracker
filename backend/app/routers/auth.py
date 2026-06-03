@@ -1,3 +1,5 @@
+from urllib.parse import quote, urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
@@ -145,27 +147,64 @@ async def strava_callback(
 
 
 @router.get("/whoop/authorize")
-async def whoop_authorize():
-    from app.core.config import settings
-
-    url = (
-        "https://api.prod.whoop.com/oauth/oauth2/auth"
-        f"?client_id={settings.whoop_client_id}"
-        "&response_type=code"
-        "&scope=read:recovery read:workout read:sleep read:profile"
-        f"&redirect_uri={settings.whoop_redirect_uri}"
+async def whoop_authorize(current_user: User = Depends(get_current_user)):
+    """Build the WHOOP authorize URL. Like Strava, we mint a signed `state` for
+    identity/CSRF. The `offline` scope is required for WHOOP to return a refresh
+    token (its access tokens expire ~hourly)."""
+    state = create_state_token(current_user.id, "whoop")
+    # urlencode handles the spaces in the multi-value scope correctly (the old
+    # code put raw spaces in the URL, which is technically malformed).
+    query = urlencode(
+        {
+            "client_id": settings.whoop_client_id,
+            "response_type": "code",
+            "scope": "read:recovery read:sleep offline",
+            "redirect_uri": settings.whoop_redirect_uri,
+            "state": state,
+        },
+        quote_via=quote,
     )
-    return {"authorization_url": url}
+    return {"authorization_url": f"https://api.prod.whoop.com/oauth/oauth2/auth?{query}"}
 
 
 @router.get("/whoop/callback")
 async def whoop_callback(
-    code: str,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
+    """WHOOP OAuth redirect target — same shape as the Strava callback: recover
+    the user from the signed `state` (no auth header on a browser redirect),
+    store encrypted tokens, run an initial sync, then redirect to the frontend."""
+    frontend = settings.frontend_url.rstrip("/")
+
+    def back(result: str) -> RedirectResponse:
+        return RedirectResponse(
+            f"{frontend}/oauth/callback?provider=whoop&status={result}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if error or not code or not state:
+        return back("error")
+
+    user_id = verify_state_token(state, "whoop")
+    if user_id is None:
+        return back("error")
+
+    user = await db.get(User, user_id)
+    if user is None:
+        return back("error")
+
     try:
-        await whoop_svc.exchange_code(code, current_user, db)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "connected"}
+        await whoop_svc.exchange_code(code, user, db)
+    except ValueError:
+        return back("error")
+
+    # Best-effort initial sync; the connection still succeeded if this hiccups.
+    try:
+        await whoop_svc.sync_recovery(user, db)
+    except ValueError:
+        pass
+
+    return back("connected")
