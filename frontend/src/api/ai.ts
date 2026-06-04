@@ -5,7 +5,19 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface DailyBriefing {
+  date: string;
+  generated_at: string;
+  recovery: string;
+  state: string;
+  recommended_workout: string;
+}
+
 export const aiApi = {
+  // Today's dashboard briefing. The backend generates it once per day and
+  // caches it, so repeated calls are cheap reads, not new Claude requests.
+  dailyBriefing: () => request<DailyBriefing>("/ai/daily-briefing"),
+
   insights: (question: string) =>
     request<{ insight: string }>("/ai/insights", {
       method: "POST",

@@ -5,14 +5,17 @@ This file never imports from fastapi — that separation keeps logic testable
 without spinning up a web server.
 """
 
+import json
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime, timezone
 
 import anthropic
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.daily_briefing import DailyBriefing
 from app.models.recovery import RecoveryScore
 from app.models.training_plan import TrainingPlan
 from app.models.user import User
@@ -215,3 +218,129 @@ async def generate_training_plan(week_start: str, user: User, db: AsyncSession) 
     await db.commit()
     await db.refresh(plan)
     return plan
+
+
+def _parse_briefing(raw: str) -> dict[str, str]:
+    """Turn Claude's reply into the three briefing fields.
+
+    Claude is *asked* for bare JSON but LLMs sometimes wrap it in ```json fences
+    or add a sentence of preamble. Rather than trust the format, we slice from
+    the first '{' to the last '}' and parse that. If it still won't parse, we
+    don't throw away the text — we surface it in 'state' so the card shows
+    something rather than an error.
+    """
+    text = raw.strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(text[start : end + 1])
+            return {
+                "recovery": str(data.get("recovery") or "—").strip(),
+                "state": str(data.get("state") or "—").strip(),
+                "recommended_workout": str(data.get("recommended_workout") or "—").strip(),
+            }
+        except json.JSONDecodeError:
+            pass
+    return {"recovery": "—", "state": text or "—", "recommended_workout": "—"}
+
+
+async def get_or_create_daily_briefing(user: User, db: AsyncSession) -> DailyBriefing:
+    """Return today's dashboard briefing, generating it once if it doesn't exist.
+
+    This is the "load once per day" core: the first call of the day makes one
+    Claude request and stores the result; every later call (later page loads,
+    re-logins) reads that stored row and makes no API call at all.
+    """
+    today = date.today()
+
+    existing = (
+        await db.execute(
+            select(DailyBriefing).where(
+                DailyBriefing.user_id == user.id,
+                DailyBriefing.date == today,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    recovery = (
+        await db.execute(
+            select(RecoveryScore).where(RecoveryScore.user_id == user.id).limit(1)
+        )
+    ).scalars().all()
+    workouts = (
+        await db.execute(
+            select(Workout).where(Workout.user_id == user.id).limit(1)
+        )
+    ).scalars().all()
+
+    # No-data guard: if nothing is connected/synced yet, there's nothing to brief
+    # on — so don't spend a Claude call to be told to connect a device. Return a
+    # transient (un-persisted) briefing; the moment real data exists, the next
+    # load generates and stores a real one.
+    if not recovery and not workouts:
+        content = {
+            "recovery": "No recovery data yet.",
+            "state": "Connect WHOOP and Strava in Settings, then sync.",
+            "recommended_workout": "Once your data is flowing, your daily recommendation appears here.",
+        }
+        return DailyBriefing(
+            user_id=user.id,
+            date=today,
+            content_json=json.dumps(content),
+            generated_at=datetime.now(timezone.utc),
+        )
+
+    if not settings.anthropic_api_key:
+        raise ValueError("AI service is not configured")
+
+    system = await _build_coach_system_prompt(user, db)
+    prompt = (
+        "Using the data above, produce today's coaching briefing as a JSON "
+        "object with exactly these three string keys:\n"
+        '- "recovery": one or two sentences on how they recovered, grounded in '
+        "their latest recovery score, HRV, resting HR, and sleep.\n"
+        '- "state": one short sentence naming their current readiness state '
+        "(e.g. primed, balanced, run-down).\n"
+        '- "recommended_workout": one or two sentences recommending today\'s '
+        "session — type plus rough intensity/duration — justified by the data.\n"
+        "Return ONLY the JSON object: no markdown fences, no preamble."
+    )
+
+    # Sonnet (claude_model), not the cheap chat Haiku: this is the flagship
+    # dashboard card and runs at most once per day, so the cost is negligible and
+    # the better reasoning is worth it for the recommendation.
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model=settings.claude_model,
+        max_tokens=512,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    content = _parse_briefing(message.content[0].text)
+
+    briefing = DailyBriefing(
+        user_id=user.id,
+        date=today,
+        content_json=json.dumps(content),
+    )
+    db.add(briefing)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Another request inserted today's row between our existence check and
+        # this commit (the unique constraint caught it). Roll back and read the
+        # winner instead of failing — and crucially, we don't double-charge for
+        # a second Claude call because that already happened above only once.
+        await db.rollback()
+        return (
+            await db.execute(
+                select(DailyBriefing).where(
+                    DailyBriefing.user_id == user.id,
+                    DailyBriefing.date == today,
+                )
+            )
+        ).scalar_one()
+    await db.refresh(briefing)
+    return briefing

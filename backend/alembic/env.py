@@ -27,6 +27,7 @@ import app.models.user              # noqa: F401
 import app.models.workout           # noqa: F401
 import app.models.recovery          # noqa: F401
 import app.models.training_plan     # noqa: F401
+import app.models.daily_briefing     # noqa: F401
 
 target_metadata = Base.metadata
 

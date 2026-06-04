@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
+from app.schemas.daily_briefing import DailyBriefingOut
 from app.schemas.training_plan import TrainingPlanOut
 from app.services import claude as claude_svc
 
@@ -50,6 +51,32 @@ async def get_insights(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return InsightResponse(insight=insight)
+
+
+@router.get("/daily-briefing", response_model=DailyBriefingOut)
+async def daily_briefing(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Today's dashboard briefing — generated once per day, cached thereafter.
+
+    This is a GET that may lazily *create* a row on first call of the day. That
+    bends REST a little (a GET with a write), but the operation is idempotent
+    per day — the unique constraint guarantees one row — and it lets the
+    frontend use a plain useQuery. The alternative (POST) would force the client
+    to manage "have I generated today's yet?" state itself.
+    """
+    try:
+        briefing = await claude_svc.get_or_create_daily_briefing(current_user, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    # content_json is guaranteed valid JSON with the three keys by the service.
+    content = json.loads(briefing.content_json)
+    return DailyBriefingOut(
+        date=briefing.date,
+        generated_at=briefing.generated_at,
+        **content,
+    )
 
 
 @router.post("/chat")
