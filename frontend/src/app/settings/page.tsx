@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 export default function SettingsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [connecting, setConnecting] = useState<"strava" | "whoop" | null>(null);
+  const [connecting, setConnecting] = useState<"strava" | "whoop" | "dexcom" | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function SettingsPage() {
     enabled: !!user,
   });
 
-  async function handleConnect(provider: "strava" | "whoop") {
+  async function handleConnect(provider: "strava" | "whoop" | "dexcom") {
     setError("");
     setConnecting(provider);
     try {
@@ -31,7 +31,9 @@ export default function SettingsPage() {
       const { authorization_url } =
         provider === "strava"
           ? await authApi.getStravaAuthorizeUrl()
-          : await authApi.getWhoopAuthorizeUrl();
+          : provider === "whoop"
+            ? await authApi.getWhoopAuthorizeUrl()
+            : await authApi.getDexcomAuthorizeUrl();
       // 2) hand the *browser* over to the provider — a navigation, not a fetch
       window.location.href = authorization_url;
     } catch (err) {
@@ -112,6 +114,37 @@ export default function SettingsPage() {
                     className="px-4 py-1.5 rounded-lg bg-emerald-400 text-[#04130C] text-sm font-semibold hover:bg-emerald-300 transition-colors duration-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {connecting === "whoop" ? "Redirecting…" : "Connect"}
+                  </button>
+                )
+              }
+            />
+
+            {/* Dexcom — CGM glucose. Web API data is delayed 1–3h (retrospective). */}
+            <ProviderCard
+              name="Dexcom"
+              description="Glucose (CGM), delayed 1–3h"
+              logo={
+                <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 2.5c3.5 4 6 7 6 10.2A6 6 0 0 1 6 12.7C6 9.5 8.5 6.5 12 2.5Z"
+                    fill="#10b981"
+                  />
+                </svg>
+              }
+              connected={connections?.dexcom_connected}
+              loading={isLoading}
+              action={
+                connections?.dexcom_connected ? (
+                  <span className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-300 text-xs font-medium border border-line">
+                    Manage
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleConnect("dexcom")}
+                    disabled={connecting === "dexcom"}
+                    className="px-4 py-1.5 rounded-lg bg-emerald-400 text-[#04130C] text-sm font-semibold hover:bg-emerald-300 transition-colors duration-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {connecting === "dexcom" ? "Redirecting…" : "Connect"}
                   </button>
                 )
               }

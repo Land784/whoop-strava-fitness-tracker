@@ -16,6 +16,7 @@ from app.core.security import (
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.schemas.user import ConnectionStatus, Token, UserCreate, UserOut
+from app.services import dexcom as dexcom_svc
 from app.services import strava as strava_svc
 from app.services import whoop as whoop_svc
 
@@ -59,6 +60,7 @@ async def get_connections(current_user: User = Depends(get_current_user)):
     return ConnectionStatus(
         strava_connected=current_user.strava_access_token is not None,
         whoop_connected=current_user.whoop_access_token is not None,
+        dexcom_connected=current_user.dexcom_access_token is not None,
     )
 
 
@@ -208,6 +210,62 @@ async def whoop_callback(
         pass
     try:
         await whoop_svc.sync_workouts(user, db)
+    except ValueError:
+        pass
+
+    return back("connected")
+
+
+# ── Dexcom OAuth ──────────────────────────────────────────────────────────────
+
+
+@router.get("/dexcom/authorize")
+async def dexcom_authorize(current_user: User = Depends(get_current_user)):
+    """Build the Dexcom authorize URL. Like Strava/WHOOP we mint a signed `state`
+    for identity/CSRF; the host (sandbox vs production) and `offline_access` scope
+    are handled in the service's authorize_url builder."""
+    state = create_state_token(current_user.id, "dexcom")
+    return {"authorization_url": dexcom_svc.authorize_url(state)}
+
+
+@router.get("/dexcom/callback")
+async def dexcom_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dexcom OAuth redirect target — same shape as the Strava/WHOOP callbacks:
+    recover the user from the signed `state` (no auth header on a browser
+    redirect), store encrypted tokens, run a best-effort initial glucose sync,
+    then redirect to the frontend."""
+    frontend = settings.frontend_url.rstrip("/")
+
+    def back(result: str) -> RedirectResponse:
+        return RedirectResponse(
+            f"{frontend}/oauth/callback?provider=dexcom&status={result}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if error or not code or not state:
+        return back("error")
+
+    user_id = verify_state_token(state, "dexcom")
+    if user_id is None:
+        return back("error")
+
+    user = await db.get(User, user_id)
+    if user is None:
+        return back("error")
+
+    try:
+        await dexcom_svc.exchange_code(code, user, db)
+    except ValueError:
+        return back("error")
+
+    # Best-effort initial sync; the connection still succeeded if this hiccups.
+    try:
+        await dexcom_svc.sync_glucose(user, db)
     except ValueError:
         pass
 

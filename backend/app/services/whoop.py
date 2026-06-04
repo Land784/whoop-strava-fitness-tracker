@@ -181,6 +181,10 @@ async def sync_workouts(user: User, db: AsyncSession) -> int:
             continue
 
         whoop_id = w["id"]
+        # Parse the start instant up front so it can also backfill an existing row.
+        start, end = w.get("start"), w.get("end")
+        started_at = parse_start(start)
+
         existing = (
             await db.execute(
                 select(Workout).where(
@@ -190,10 +194,12 @@ async def sync_workouts(user: User, db: AsyncSession) -> int:
             )
         ).scalar_one_or_none()
         if existing:
+            # Backfill started_at onto rows synced before that column existed, so
+            # glucose windowing works for historical workouts. No-op once set.
+            if existing.started_at is None and started_at is not None:
+                existing.started_at = started_at
             continue
 
-        start, end = w.get("start"), w.get("end")
-        started_at = parse_start(start)
         duration = None
         if start and end:
             duration = int(

@@ -15,7 +15,7 @@ things that matter most here:
 Plus the trio every endpoint needs: happy path, auth failure (401), isolation.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import hash_password
 from app.models.daily_briefing import DailyBriefing
+from app.models.glucose import GlucoseReading
 from app.models.recovery import RecoveryScore
 from app.models.training_plan import TrainingPlan
 from app.models.user import User
@@ -141,6 +142,43 @@ async def test_get_insights_uses_chat_model_and_grounds_in_user_data(
     # The user's actual data was baked into the system prompt.
     assert "Run" in recorder["system"]
     assert "65.0" in recorder["system"]
+
+
+async def test_system_prompt_includes_glucose_summary_and_insulin_guardrail(
+    db: AsyncSession, user: User, monkeypatch
+):
+    """A workout with CGM readings in its window surfaces a glucose summary in
+    the prompt, and the no-insulin-dosing guardrail is always present."""
+    start = datetime(2026, 6, 1, 12, 0, 0)
+    db.add(
+        Workout(
+            user_id=user.id,
+            type="Ride",
+            date=date(2026, 6, 1),
+            started_at=start,
+            duration_seconds=3600,
+        )
+    )
+    # 3 readings inside the [11:00, 15:00] window so the summary is produced.
+    for mins, val in [(30, 140), (90, 110), (150, 68)]:
+        db.add(
+            GlucoseReading(
+                user_id=user.id,
+                system_time=start + timedelta(minutes=mins),
+                value_mgdl=val,
+                trend="flat",
+            )
+        )
+    await db.commit()
+
+    recorder = install_fake_anthropic(monkeypatch)
+    await claude.get_insights("How did my sugar do on that ride?", user, db)
+
+    system = recorder["system"]
+    assert "glucose:" in system          # the per-workout summary line
+    assert "start 140" in system         # earliest in-window reading
+    # The safety guardrail is baked into the shared system-prompt builder.
+    assert "insulin" in system.lower()
 
 
 async def test_get_insights_requires_api_key(db: AsyncSession, user: User, monkeypatch):
