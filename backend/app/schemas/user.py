@@ -31,3 +31,4 @@ class ConnectionStatus(BaseModel):
 
     strava_connected: bool
     whoop_connected: bool
+    dexcom_connected: bool

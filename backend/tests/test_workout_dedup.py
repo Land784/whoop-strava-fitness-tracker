@@ -6,6 +6,8 @@ window — and asserts they collapse into a single merged row (source="both")
 with the field-aware values: Strava distance/duration/type, WHOOP heart rate.
 """
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,7 @@ from app.core.security import encrypt_token
 from app.models.user import User
 from app.models.workout import Workout
 from app.services import strava, whoop
+from app.services.workout_match import merge_existing_duplicates
 
 pytestmark = pytest.mark.asyncio
 
@@ -166,3 +169,42 @@ async def test_resync_is_idempotent(db: AsyncSession, user: User, monkeypatch):
     assert await strava.sync_activities(user, db) == 0
     assert await whoop.sync_workouts(user, db) == 0
     await _assert_single_merged_row(db, user)
+
+
+async def test_merge_existing_duplicates_cleans_legacy_pairs(db: AsyncSession, user: User):
+    """One-off cleanup of duplicates that predate started_at: a Strava-only and a
+    WHOOP-only row at the same start time collapse into one merged row, while an
+    unrelated solo workout is left untouched."""
+    # Same physical session stored as two single-source rows (no insert-time
+    # match was possible because started_at didn't exist yet).
+    db.add(Workout(
+        user_id=user.id, source="strava", strava_id="555", type="Run",
+        started_at=datetime(2026, 6, 1, 8, 2, 0),
+        duration_seconds=2600, distance_meters=9500.0, avg_hr=148,
+    ))
+    db.add(Workout(
+        user_id=user.id, source="whoop", whoop_id="whoop-run", type="Running",
+        started_at=datetime(2026, 6, 1, 8, 0, 0),
+        duration_seconds=2700, distance_meters=9000.0, avg_hr=152,
+    ))
+    # Unrelated solo workout — must survive the cleanup unchanged.
+    db.add(Workout(
+        user_id=user.id, source="strava", strava_id="999", type="Ride",
+        started_at=datetime(2026, 6, 2, 9, 0, 0),
+        duration_seconds=3600, distance_meters=20000.0, avg_hr=130,
+    ))
+    await db.commit()
+
+    assert await merge_existing_duplicates(db, user.id) == 1
+
+    rows = (
+        await db.execute(select(Workout).where(Workout.user_id == user.id))
+    ).scalars().all()
+    assert len(rows) == 2  # the pair collapsed to one + the solo ride
+    both = next(r for r in rows if r.source == "both")
+    assert both.strava_id == "555"
+    assert both.whoop_id == "whoop-run"
+    assert both.distance_meters == 9500.0  # Strava wins distance
+    assert both.avg_hr == 152              # WHOOP wins heart rate
+    # Idempotent: nothing left to merge on a second pass.
+    assert await merge_existing_duplicates(db, user.id) == 0

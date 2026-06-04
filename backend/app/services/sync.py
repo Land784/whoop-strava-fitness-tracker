@@ -3,7 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.services import strava, whoop
+from app.services import dexcom, strava, whoop
 
 
 async def sync_all(user: User, db: AsyncSession) -> dict[str, int | str]:
@@ -29,5 +29,10 @@ async def sync_all(user: User, db: AsyncSession) -> dict[str, int | str]:
         results["whoop_workouts"] = await whoop.sync_workouts(user, db)
     except ValueError as exc:
         results["whoop_workouts_error"] = str(exc)
+
+    try:
+        results["dexcom_glucose"] = await dexcom.sync_glucose(user, db)
+    except ValueError as exc:
+        results["dexcom_error"] = str(exc)
 
     return results

@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     strava_client_secret: str = ""
     strava_redirect_uri: str = "http://localhost:8000/auth/strava/callback"
 
+    # Dexcom (CGM glucose). dexcom_use_sandbox flips the API + OAuth host between
+    # Dexcom's sandbox (synthetic data, instant access) and production (real data,
+    # requires Dexcom app-review approval). The service reads this flag to pick the
+    # base URL, so going live is an env change, not a code change.
+    dexcom_client_id: str = ""
+    dexcom_client_secret: str = ""
+    dexcom_redirect_uri: str = "http://localhost:8000/auth/dexcom/callback"
+    dexcom_use_sandbox: bool = True
+
     # AI
     anthropic_api_key: str = ""
     # Centralised so the model can be bumped in one place (or overridden via

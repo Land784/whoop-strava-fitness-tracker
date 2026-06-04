@@ -24,4 +24,7 @@ export const authApi = {
 
   getWhoopAuthorizeUrl: () =>
     request<{ authorization_url: string }>("/auth/whoop/authorize"),
+
+  getDexcomAuthorizeUrl: () =>
+    request<{ authorization_url: string }>("/auth/dexcom/authorize"),
 };

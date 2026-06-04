@@ -20,6 +20,7 @@ from app.models.recovery import RecoveryScore
 from app.models.training_plan import TrainingPlan
 from app.models.user import User
 from app.models.workout import Workout
+from app.services.glucose import summarize_workout_glucose
 
 # How many prior turns of a conversation we feed back to Claude. Bounds the
 # token cost (and latency) of a long chat — older turns drop off the front.
@@ -54,24 +55,62 @@ async def _build_coach_system_prompt(user: User, db: AsyncSession) -> str:
 
     # No TSS here: we don't compute it yet, so "tss=None" would just mislead the
     # model. Describe load with the fields we actually have from Strava.
-    workout_ctx = "\n".join(
-        f"- {w.type or 'Unknown'} on {w.date}: "
-        f"{w.duration_seconds}s, dist={w.distance_meters}m, avg_hr={w.avg_hr}"
-        for w in workouts
-    ) or "No recent workouts."
+    #
+    # Each workout line also gets its glucose summary, computed on the fly from
+    # the raw CGM readings in a padded window (services/glucose.py). On the fly,
+    # not stored, because the 1-3h-delayed Dexcom data fills in over time — a
+    # summary frozen at sync would be permanently half-empty for recent sessions.
+    # Python does the arithmetic; Claude only phrases it.
+    workout_lines: list[str] = []
+    any_glucose = False
+    for w in workouts:
+        line = (
+            f"- {w.type or 'Unknown'} on {w.date}: "
+            f"{w.duration_seconds}s, dist={w.distance_meters}m, avg_hr={w.avg_hr}"
+        )
+        g = await summarize_workout_glucose(w, db)
+        if g:
+            any_glucose = True
+            line += (
+                f" | glucose: start {g['start_mgdl']}, min {g['min_mgdl']}, "
+                f"avg {g['avg_mgdl']}, max {g['max_mgdl']} mg/dL, "
+                f"drop {g['drop_mgdl']}, {g['count_below_70']} reading(s) <70 "
+                f"(over {g['count']} readings)"
+            )
+        workout_lines.append(line)
+    workout_ctx = "\n".join(workout_lines) or "No recent workouts."
 
     recovery_ctx = "\n".join(
         f"- {r.date}: recovery={r.whoop_recovery_score}, hrv={r.hrv_ms}ms, rhr={r.resting_hr}, sleep={r.sleep_score}"
         for r in recovery
     ) or "No recent recovery data."
 
+    glucose_note = (
+        "Glucose values above are Dexcom CGM readings and are delayed 1-3 hours, "
+        "so they describe past sessions — never the current moment."
+        if any_glucose
+        else "No glucose data is attached to these workouts yet."
+    )
+
     # System prompt bakes in the user's data so Claude has context for
     # every response without the client needing to send it each time.
+    #
+    # The medical-safety guardrail lives here, in code, rather than relying on us
+    # to prompt it correctly each call — and because every entry point (chat,
+    # insight, daily briefing) shares this builder, the guardrail covers them all.
     return (
         "You are a personal fitness coach. Always ground your advice in the "
         "user's actual data shown below.\n\n"
         f"Recent workouts (last 7):\n{workout_ctx}\n\n"
-        f"Recent recovery (last 7 days):\n{recovery_ctx}"
+        f"Recent recovery (last 7 days):\n{recovery_ctx}\n\n"
+        f"{glucose_note}\n\n"
+        "IMPORTANT — medical safety: You are not a medical device and must never "
+        "give insulin dosing advice. Do not recommend insulin doses, basal rates, "
+        "bolus amounts, correction factors, or carbohydrate-ratio changes. If the "
+        "user asks how much insulin to take or how to adjust their pump, decline "
+        "and tell them to consult their care team or endocrinologist. You may "
+        "discuss general fueling, carbohydrate timing, and the glucose patterns "
+        "you observe in their data."
     )
 
 

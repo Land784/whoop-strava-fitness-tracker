@@ -139,3 +139,61 @@ def merge_into(existing: Workout, incoming: dict, incoming_source: str) -> None:
     existing.started_at = merged["started_at"]
     existing.date = merged["date"]
     existing.source = "both"
+
+
+async def merge_existing_duplicates(db: AsyncSession, user_id: int) -> int:
+    """One-off cleanup: merge cross-source duplicate workouts already in the DB.
+
+    New workouts merge at insert time (find_cross_source_duplicate), but rows
+    synced *before* the started_at column existed had no start instant to match
+    on, so the same session from Strava and WHOOP was stored as two rows. Now
+    that started_at has been backfilled, this pairs a Strava-only row with a
+    WHOOP-only row at the same start time, merges the WHOOP row into the Strava
+    row (source='both', both ids set), and deletes the now-redundant WHOOP row.
+
+    Returns the number of merges performed. Idempotent: with no remaining
+    single-source pairs it merges nothing.
+    """
+    def _single_source(rows, keep_id, drop_id):
+        return [r for r in rows if getattr(r, keep_id) and not getattr(r, drop_id)]
+
+    all_rows = (
+        await db.execute(
+            select(Workout).where(
+                Workout.user_id == user_id,
+                Workout.started_at.is_not(None),
+            )
+        )
+    ).scalars().all()
+
+    strava_rows = _single_source(all_rows, "strava_id", "whoop_id")
+    whoop_rows = _single_source(all_rows, "whoop_id", "strava_id")
+
+    merges = 0
+    used: set[int] = set()
+    for s in strava_rows:
+        # Nearest unused WHOOP row within the match window (same policy as the
+        # insert-time matcher) — start time alone is a strong enough signal.
+        candidates = [
+            w
+            for w in whoop_rows
+            if w.id not in used
+            and abs((w.started_at - s.started_at).total_seconds()) <= MATCH_WINDOW.total_seconds()
+        ]
+        if not candidates:
+            continue
+        w = min(candidates, key=lambda x: abs((x.started_at - s.started_at).total_seconds()))
+
+        # Capture the WHOOP fields into a plain dict, then delete + flush the
+        # WHOOP row BEFORE merge_into reassigns its whoop_id to the Strava row.
+        # Otherwise both rows briefly hold the same whoop_id and the unique
+        # constraint trips on flush.
+        incoming = {**_view_from_row(w), "whoop_id": w.whoop_id}
+        used.add(w.id)
+        await db.delete(w)
+        await db.flush()
+        merge_into(s, incoming, "whoop")
+        merges += 1
+
+    await db.commit()
+    return merges

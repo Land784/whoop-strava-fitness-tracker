@@ -12,6 +12,7 @@ export interface Token {
 export interface ConnectionStatus {
   strava_connected: boolean;
   whoop_connected: boolean;
+  dexcom_connected: boolean;
 }
 
 export interface Workout {

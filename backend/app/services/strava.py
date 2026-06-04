@@ -112,6 +112,11 @@ async def sync_activities(user: User, db: AsyncSession) -> int:
     for activity in activities:
         strava_id = str(activity["id"])
 
+        # Use start_date (UTC) for matching; start_date_local is for the display
+        # date. Falling back to local keeps tests/fixtures that only set one.
+        # Computed up front so we can also backfill it onto an existing row.
+        started_at = parse_start(activity.get("start_date") or activity.get("start_date_local"))
+
         # Upsert pattern: skip if we already have this activity
         existing = (
             await db.execute(
@@ -123,11 +128,13 @@ async def sync_activities(user: User, db: AsyncSession) -> int:
         ).scalar_one_or_none()
 
         if existing:
+            # Backfill started_at onto rows synced before that column existed, so
+            # glucose windowing (and cross-source dedup) work for historical
+            # workouts. No-op once it's already set.
+            if existing.started_at is None and started_at is not None:
+                existing.started_at = started_at
             continue
 
-        # Use start_date (UTC) for matching; start_date_local is for the display
-        # date. Falling back to local keeps tests/fixtures that only set one.
-        started_at = parse_start(activity.get("start_date") or activity.get("start_date_local"))
         fields = {
             "strava_id": strava_id,
             "type": activity.get("sport_type") or activity.get("type"),

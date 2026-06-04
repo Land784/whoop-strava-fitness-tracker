@@ -81,7 +81,11 @@ async def test_connections_false_when_not_connected(
 ):
     resp = await client.get("/auth/connections", headers=auth_headers)
     assert resp.status_code == 200
-    assert resp.json() == {"strava_connected": False, "whoop_connected": False}
+    assert resp.json() == {
+        "strava_connected": False,
+        "whoop_connected": False,
+        "dexcom_connected": False,
+    }
 
 
 async def test_connections_true_after_token_stored(
