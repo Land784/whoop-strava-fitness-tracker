@@ -74,17 +74,25 @@ export default function AIPage() {
   const awaitingFirstToken =
     isStreaming && messages[messages.length - 1]?.content === "";
 
+  // h-screen (not min-h-screen) pins the page to exactly the viewport so the
+  // scroll lives INSIDE the chat panel instead of growing the whole page;
+  // overflow-hidden stops any rounding overflow from creating a body scroll.
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 flex flex-col p-8 max-w-3xl">
+      {/* min-h-0: lets this column shrink within the row so its children can
+          scroll rather than push the layout taller. */}
+      <main className="flex-1 flex flex-col p-8 max-w-3xl min-h-0">
         <div className="mb-6">
           <h1 className="font-display text-2xl font-bold text-white">AI Insights</h1>
           <p className="text-slate-500 text-sm mt-0.5">Ask your personal AI fitness coach anything.</p>
         </div>
 
-        <div className="flex-1 bg-panel rounded-2xl border border-line flex flex-col overflow-hidden mb-4">
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 min-h-0 bg-panel rounded-2xl border border-line flex flex-col overflow-hidden mb-4">
+          {/* min-h-0 here is the key fix: a flex item defaults to min-height:auto
+              (won't shrink below its content), which defeats overflow-y-auto.
+              Allowing it to shrink is what makes the messages list scroll. */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
             {messages.length === 0 && !isStreaming && (
               <div className="h-full flex flex-col items-center justify-center text-center py-10">
                 <div className="w-12 h-12 bg-emerald-400/15 rounded-full flex items-center justify-center mb-4">
