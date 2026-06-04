@@ -127,6 +127,7 @@ async def sync_activities(user: User, db: AsyncSession) -> int:
         workout = Workout(
             user_id=user.id,
             strava_id=strava_id,
+            source="strava",
             type=activity.get("sport_type") or activity.get("type"),
             date=date.fromisoformat(activity["start_date_local"][:10]),
             duration_seconds=activity.get("moving_time"),

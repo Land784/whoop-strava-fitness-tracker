@@ -9,7 +9,7 @@ Targets the WHOOP v2 API. Sleep performance lives on the sleep records, not the
 recovery records, so we fetch both and join them on the recovery's `sleep_id`.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 import httpx
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.security import decrypt_token, encrypt_token
 from app.models.recovery import RecoveryScore
 from app.models.user import User
+from app.models.workout import Workout
 
 WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v2"
@@ -143,6 +144,69 @@ async def sync_recovery(user: User, db: AsyncSession) -> int:
                 hrv_ms=score.get("hrv_rmssd_milli"),
                 resting_hr=score.get("resting_heart_rate"),
                 sleep_score=sleep_perf.get(rec.get("sleep_id")),
+            )
+        )
+        synced += 1
+
+    await db.commit()
+    return synced
+
+
+async def sync_workouts(user: User, db: AsyncSession) -> int:
+    """Fetch recent WHOOP workouts and upsert them as Workout rows
+    (source="whoop"). Returns the number of new rows added.
+
+    We intentionally do NOT dedupe against Strava — a workout recorded by both
+    appears once per source, distinguished by the `source` column / UI badge.
+    """
+    if not user.whoop_access_token:
+        raise ValueError("User has not connected WHOOP")
+
+    token = decrypt_token(user.whoop_access_token)
+
+    resp = await _get("/activity/workout", token, {"limit": 25})
+    if resp.status_code == 401:
+        token = await refresh_token(user, db)
+        resp = await _get("/activity/workout", token, {"limit": 25})
+    if resp.status_code != 200:
+        raise ValueError(f"WHOOP workout fetch failed: {resp.status_code}")
+
+    synced = 0
+    for w in resp.json().get("records", []):
+        if w.get("score_state") != "SCORED":
+            continue
+
+        whoop_id = w["id"]
+        existing = (
+            await db.execute(
+                select(Workout).where(
+                    Workout.user_id == user.id,
+                    Workout.whoop_id == whoop_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            continue
+
+        start, end = w.get("start"), w.get("end")
+        duration = None
+        if start and end:
+            duration = int(
+                (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+            )
+        score = w.get("score") or {}
+
+        db.add(
+            Workout(
+                user_id=user.id,
+                whoop_id=whoop_id,
+                source="whoop",
+                # "running" -> "Running", "functional_fitness" -> "Functional Fitness"
+                type=(w.get("sport_name") or "Workout").replace("_", " ").title(),
+                date=date.fromisoformat(start[:10]) if start else None,
+                duration_seconds=duration,
+                distance_meters=score.get("distance_meter"),
+                avg_hr=score.get("average_heart_rate"),
             )
         )
         synced += 1

@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -12,8 +12,14 @@ class Workout(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
-    # strava_id lets us upsert rather than duplicate when syncing from Strava
+    # strava_id / whoop_id let us upsert rather than duplicate when syncing from
+    # each provider (a workout can come from either source).
     strava_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    whoop_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+
+    # Provenance: "strava" | "whoop" | "manual" — drives the source badge in the
+    # UI. server_default keeps existing rows valid when this column is added.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'manual'"))
 
     date: Mapped[date | None] = mapped_column(Date, nullable=True)
     type: Mapped[str | None] = mapped_column(String(100), nullable=True)

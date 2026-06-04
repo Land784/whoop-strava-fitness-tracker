@@ -25,4 +25,9 @@ async def sync_all(user: User, db: AsyncSession) -> dict[str, int | str]:
     except ValueError as exc:
         results["whoop_error"] = str(exc)
 
+    try:
+        results["whoop_workouts"] = await whoop.sync_workouts(user, db)
+    except ValueError as exc:
+        results["whoop_workouts_error"] = str(exc)
+
     return results

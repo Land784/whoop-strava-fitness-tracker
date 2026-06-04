@@ -18,6 +18,8 @@ export interface Workout {
   id: number;
   user_id: number;
   strava_id: string | null;
+  whoop_id: string | null;
+  source: string; // "strava" | "whoop" | "manual"
   type: string | null;
   date: string | null;
   duration_seconds: number | null;

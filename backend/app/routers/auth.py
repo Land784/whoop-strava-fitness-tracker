@@ -158,7 +158,7 @@ async def whoop_authorize(current_user: User = Depends(get_current_user)):
         {
             "client_id": settings.whoop_client_id,
             "response_type": "code",
-            "scope": "read:recovery read:sleep offline",
+            "scope": "read:recovery read:sleep read:workout offline",
             "redirect_uri": settings.whoop_redirect_uri,
             "state": state,
         },
@@ -204,6 +204,10 @@ async def whoop_callback(
     # Best-effort initial sync; the connection still succeeded if this hiccups.
     try:
         await whoop_svc.sync_recovery(user, db)
+    except ValueError:
+        pass
+    try:
+        await whoop_svc.sync_workouts(user, db)
     except ValueError:
         pass
 

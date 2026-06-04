@@ -23,4 +23,6 @@ class WorkoutOut(WorkoutCreate):
     id: int
     user_id: int
     strava_id: str | None = None
+    whoop_id: str | None = None
+    source: str
     created_at: datetime
