@@ -29,7 +29,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     # Centralised so the model can be bumped in one place (or overridden via
     # env) instead of being hardcoded at each call site.
+    #
+    # Two models on purpose:
+    #   - claude_model: the stronger Sonnet, used for the weekly training plan.
+    #     It runs rarely (once a week) and benefits from better reasoning.
+    #   - claude_chat_model: the cheaper/faster Haiku, used for the chat
+    #     insights endpoint. That call is high-frequency and "look at my data,
+    #     give advice" doesn't need Sonnet-level reasoning. Haiku is ~3x cheaper
+    #     per token, so this is where the cost savings actually land.
     claude_model: str = "claude-sonnet-4-6"
+    claude_chat_model: str = "claude-haiku-4-5-20251001"
 
     # Token encryption — Fernet key for encrypting OAuth tokens at rest.
     # Intentionally required (no default): the app should refuse to start rather

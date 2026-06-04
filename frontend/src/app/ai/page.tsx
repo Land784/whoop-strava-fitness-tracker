@@ -3,15 +3,9 @@
 import Sidebar from "@/components/layout/Sidebar";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/contexts/AuthContext";
-import { aiApi } from "@/api/ai";
-import { useMutation } from "@tanstack/react-query";
+import { aiApi, type ChatMessage as Message } from "@/api/ai";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
 
 const SUGGESTIONS = [
   "Give me a summary of my recent fitness trends",
@@ -25,6 +19,7 @@ export default function AIPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,40 +30,70 @@ export default function AIPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // useMutation is ideal for the chat pattern: each send is a one-off
-  // request with its own loading state, not a cached query.
-  const insightMutation = useMutation({
-    mutationFn: (question: string) => aiApi.insights(question),
-    onSuccess: (data) => {
-      setMessages((m) => [...m, { role: "assistant", content: data.insight }]);
-    },
-    onError: (err) => {
-      setMessages((m) => [...m, {
-        role: "assistant",
-        content: `Error: ${err instanceof Error ? err.message : "Request failed"}`,
-      }]);
-    },
-  });
+  // We don't use React Query here: a streaming response isn't a single
+  // resolved value, it's a sequence of deltas we fold into the last message as
+  // they arrive. So we manage the stream by hand.
+  async function send(question: string) {
+    if (!question.trim() || isStreaming) return;
 
-  function send(question: string) {
-    if (!question.trim() || insightMutation.isPending) return;
-    setMessages((m) => [...m, { role: "user", content: question }]);
+    // The history we send is everything so far PLUS this new user turn. We add
+    // an empty assistant message to the UI as the streaming target.
+    const history: Message[] = [...messages, { role: "user", content: question }];
+    setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
-    insightMutation.mutate(question);
+    setIsStreaming(true);
+
+    try {
+      await aiApi.streamChat(history, (delta) => {
+        // Append each chunk to the last (assistant) message. We copy the array
+        // and replace the final element so React sees a new reference and
+        // re-renders — mutating in place would not trigger an update.
+        setMessages((m) => {
+          const copy = m.slice();
+          const last = copy[copy.length - 1];
+          copy[copy.length - 1] = { ...last, content: last.content + delta };
+          return copy;
+        });
+      });
+    } catch (err) {
+      setMessages((m) => {
+        const copy = m.slice();
+        copy[copy.length - 1] = {
+          role: "assistant",
+          content: `Error: ${err instanceof Error ? err.message : "Request failed"}`,
+        };
+        return copy;
+      });
+    } finally {
+      setIsStreaming(false);
+    }
   }
 
+  // Show the typing dots only while we're waiting for the FIRST token — once
+  // text starts arriving, the streamed message itself is the feedback.
+  const awaitingFirstToken =
+    isStreaming && messages[messages.length - 1]?.content === "";
+
+  // h-screen (not min-h-screen) pins the page to exactly the viewport so the
+  // scroll lives INSIDE the chat panel instead of growing the whole page;
+  // overflow-hidden stops any rounding overflow from creating a body scroll.
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 flex flex-col p-8 max-w-3xl">
+      {/* min-h-0: lets this column shrink within the row so its children can
+          scroll rather than push the layout taller. */}
+      <main className="flex-1 flex flex-col p-8 max-w-3xl min-h-0">
         <div className="mb-6">
           <h1 className="font-display text-2xl font-bold text-white">AI Insights</h1>
           <p className="text-slate-500 text-sm mt-0.5">Ask your personal AI fitness coach anything.</p>
         </div>
 
-        <div className="flex-1 bg-panel rounded-2xl border border-line flex flex-col overflow-hidden mb-4">
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.length === 0 && !insightMutation.isPending && (
+        <div className="flex-1 min-h-0 bg-panel rounded-2xl border border-line flex flex-col overflow-hidden mb-4">
+          {/* min-h-0 here is the key fix: a flex item defaults to min-height:auto
+              (won't shrink below its content), which defeats overflow-y-auto.
+              Allowing it to shrink is what makes the messages list scroll. */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
+            {messages.length === 0 && !isStreaming && (
               <div className="h-full flex flex-col items-center justify-center text-center py-10">
                 <div className="w-12 h-12 bg-emerald-400/15 rounded-full flex items-center justify-center mb-4">
                   <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -91,7 +116,10 @@ export default function AIPage() {
               </div>
             )}
 
-            {messages.map((msg, i) => (
+            {messages.map((msg, i) =>
+              // The empty assistant placeholder (pre-first-token) is represented
+              // by the typing dots below, so skip rendering an empty bubble.
+              msg.content === "" ? null : (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
                   msg.role === "user"
@@ -103,7 +131,7 @@ export default function AIPage() {
               </div>
             ))}
 
-            {insightMutation.isPending && (
+            {awaitingFirstToken && (
               <div className="flex justify-start">
                 <div className="bg-white/5 border border-line rounded-2xl rounded-bl-sm px-4 py-3">
                   <div className="flex gap-1 items-center h-4">
@@ -125,7 +153,7 @@ export default function AIPage() {
                 placeholder="Ask about your fitness data…"
                 className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-line text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400/60 focus:border-transparent transition-colors"
               />
-              <Button type="submit" loading={insightMutation.isPending} disabled={!input.trim()}>
+              <Button type="submit" loading={isStreaming} disabled={!input.trim() || isStreaming}>
                 Send
               </Button>
             </form>
