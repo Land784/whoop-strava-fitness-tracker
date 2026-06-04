@@ -233,19 +233,25 @@ export default function WorkoutsPage() {
                           </div>
                           <div>
                             <p className="font-medium text-slate-100">{w.type ?? "Workout"}</p>
-                            {w.source === "strava" ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-[#FC4C02] font-medium">
-                                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="#FC4C02"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169" /></svg>
-                                Strava
-                              </span>
-                            ) : w.source === "whoop" ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-sky-400 font-medium">
-                                <span className="w-2 h-2 rounded-full border border-sky-400 inline-block" />
-                                WHOOP
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-slate-500">Manual</span>
-                            )}
+                            {/* A merged workout (source="both") carries data from
+                                Strava AND WHOOP, so show both chips. */}
+                            <div className="flex items-center gap-1.5">
+                              {(w.source === "strava" || w.source === "both") && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-[#FC4C02] font-medium">
+                                  <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="#FC4C02"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169" /></svg>
+                                  Strava
+                                </span>
+                              )}
+                              {(w.source === "whoop" || w.source === "both") && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-sky-400 font-medium">
+                                  <span className="w-2 h-2 rounded-full border border-sky-400 inline-block" />
+                                  WHOOP
+                                </span>
+                              )}
+                              {w.source === "manual" && (
+                                <span className="text-[10px] text-slate-500">Manual</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>

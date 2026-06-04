@@ -8,6 +8,7 @@
  *     us hand-patching local state.
  */
 
+import { aiApi } from "@/api/ai";
 import { recoveryApi } from "@/api/recovery";
 import { workoutsApi } from "@/api/workouts";
 import { formatDuration, formatMiles, formatPace } from "@/lib/format";
@@ -43,6 +44,22 @@ export default function DashboardPage() {
     queryKey: ["recovery"],
     queryFn: () => recoveryApi.list(0, 7),
     enabled: !!user,
+  });
+
+  // The daily briefing: staleTime Infinity means React Query won't refetch it
+  // within this session (no refetch on remount or window refocus). Combined
+  // with the server caching it per day, that's the "load once" behaviour — at
+  // most one Claude call per day, reused on every dashboard visit.
+  const {
+    data: briefing,
+    isLoading: briefingLoading,
+    isError: briefingError,
+  } = useQuery({
+    queryKey: ["daily-briefing"],
+    queryFn: () => aiApi.dailyBriefing(),
+    enabled: !!user,
+    staleTime: Infinity,
+    retry: false, // a 503 (AI not configured) shouldn't retry three times
   });
 
   const sync = useMutation({
@@ -199,11 +216,40 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="rounded-2xl border border-line bg-gradient-to-br from-emerald-400/10 to-sky-400/10 p-5">
-              <p className="text-xs font-semibold text-slate-200 mb-1">AI Coach</p>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Ask for a training plan or recovery insight on the{" "}
-                <span className="text-emerald-400">AI Insights</span> page.
-              </p>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <p className="text-xs font-semibold text-slate-200">AI Coach · Today</p>
+              </div>
+
+              {briefingLoading ? (
+                <div className="space-y-2 animate-pulse" aria-label="Loading briefing">
+                  <div className="h-3 bg-white/10 rounded w-5/6" />
+                  <div className="h-3 bg-white/10 rounded w-2/3" />
+                  <div className="h-3 bg-white/10 rounded w-3/4" />
+                </div>
+              ) : briefingError || !briefing ? (
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Couldn&apos;t load today&apos;s briefing. Try the{" "}
+                  <span className="text-emerald-400">AI Insights</span> page.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {(
+                    [
+                      ["Recovery", briefing.recovery],
+                      ["State", briefing.state],
+                      ["Recommended", briefing.recommended_workout],
+                    ] as const
+                  ).map(([label, text]) => (
+                    <div key={label}>
+                      <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         </div>

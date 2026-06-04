@@ -22,6 +22,11 @@ class Workout(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'manual'"))
 
     date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Precise start instant (naive UTC), used to detect the *same* physical
+    # workout arriving from both Strava and WHOOP. `date` alone is too coarse —
+    # two sessions on one day would collide. Nullable because older rows (and
+    # manual entries) may not have it. See services/workout_match.py.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     distance_meters: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -20,6 +20,7 @@ from app.core.security import decrypt_token, encrypt_token
 from app.models.recovery import RecoveryScore
 from app.models.user import User
 from app.models.workout import Workout
+from app.services.workout_match import find_cross_source_duplicate, merge_into, parse_start
 
 WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v2"
@@ -153,11 +154,14 @@ async def sync_recovery(user: User, db: AsyncSession) -> int:
 
 
 async def sync_workouts(user: User, db: AsyncSession) -> int:
-    """Fetch recent WHOOP workouts and upsert them as Workout rows
-    (source="whoop"). Returns the number of new rows added.
+    """Fetch recent WHOOP workouts and upsert them as Workout rows.
+    Returns the number of new rows added (merges into an existing Strava row
+    don't count as new).
 
-    We intentionally do NOT dedupe against Strava — a workout recorded by both
-    appears once per source, distinguished by the `source` column / UI badge.
+    If the same physical workout was already pulled from Strava (matched by
+    start time), we merge into that row instead of inserting a duplicate — the
+    result is one workout with source="both", carrying both ids. See
+    services/workout_match.py for the matching + field-priority policy.
     """
     if not user.whoop_access_token:
         raise ValueError("User has not connected WHOOP")
@@ -189,26 +193,32 @@ async def sync_workouts(user: User, db: AsyncSession) -> int:
             continue
 
         start, end = w.get("start"), w.get("end")
+        started_at = parse_start(start)
         duration = None
         if start and end:
             duration = int(
                 (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
             )
         score = w.get("score") or {}
+        fields = {
+            "whoop_id": whoop_id,
+            # "running" -> "Running", "functional_fitness" -> "Functional Fitness"
+            "type": (w.get("sport_name") or "Workout").replace("_", " ").title(),
+            "date": date.fromisoformat(start[:10]) if start else None,
+            "started_at": started_at,
+            "duration_seconds": duration,
+            "distance_meters": score.get("distance_meter"),
+            "avg_hr": score.get("average_heart_rate"),
+        }
 
-        db.add(
-            Workout(
-                user_id=user.id,
-                whoop_id=whoop_id,
-                source="whoop",
-                # "running" -> "Running", "functional_fitness" -> "Functional Fitness"
-                type=(w.get("sport_name") or "Workout").replace("_", " ").title(),
-                date=date.fromisoformat(start[:10]) if start else None,
-                duration_seconds=duration,
-                distance_meters=score.get("distance_meter"),
-                avg_hr=score.get("average_heart_rate"),
-            )
-        )
+        # Same session already pulled from Strava? Merge into it instead of
+        # creating a duplicate (one row, source="both", both ids set).
+        match = await find_cross_source_duplicate(db, user.id, started_at, "whoop")
+        if match is not None:
+            merge_into(match, fields, "whoop")
+            continue
+
+        db.add(Workout(user_id=user.id, source="whoop", **fields))
         synced += 1
 
     await db.commit()

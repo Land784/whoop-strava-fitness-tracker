@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.models.daily_briefing import DailyBriefing
 from app.models.recovery import RecoveryScore
 from app.models.training_plan import TrainingPlan
 from app.models.user import User
@@ -79,8 +80,10 @@ class _FakeMessages:
 
     async def create(self, **kwargs):
         # Capture everything the service passed (model, system, messages, ...)
-        # so a test can assert on it afterwards.
+        # so a test can assert on it afterwards. Count calls too, so a test can
+        # prove the cached path makes NO second API call.
         self._recorder.update(kwargs)
+        self._recorder["create_calls"] = self._recorder.get("create_calls", 0) + 1
         return _FakeMessage(self._reply)
 
     def stream(self, **kwargs):
@@ -291,4 +294,97 @@ async def test_chat_returns_503_when_unconfigured(
         json={"messages": [{"role": "user", "content": "hi"}]},
         headers=auth_headers,
     )
+    assert resp.status_code == 503
+
+
+# ── Daily briefing (dashboard, once-per-day) ────────────────────────────────────
+
+BRIEFING_JSON = (
+    '{"recovery": "You recovered well overnight.", '
+    '"state": "Primed", '
+    '"recommended_workout": "Hard intervals, ~45 min."}'
+)
+
+
+async def test_daily_briefing_generates_parses_and_uses_sonnet(
+    client: AsyncClient, auth_headers: dict, db: AsyncSession, user: User, monkeypatch
+):
+    db.add(RecoveryScore(user_id=user.id, date=date(2026, 6, 3), whoop_recovery_score=80.0))
+    await db.commit()
+    recorder = install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON)
+
+    resp = await client.get("/ai/daily-briefing", headers=auth_headers)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["recovery"] == "You recovered well overnight."
+    assert data["state"] == "Primed"
+    assert data["recommended_workout"] == "Hard intervals, ~45 min."
+    # Flagship card → Sonnet, not the cheap chat model.
+    assert recorder["model"] == settings.claude_model
+
+
+async def test_daily_briefing_is_cached_after_first_generation(
+    db: AsyncSession, user: User, monkeypatch
+):
+    """Second call returns the stored row and makes NO second Claude call."""
+    db.add(RecoveryScore(user_id=user.id, date=date(2026, 6, 3), whoop_recovery_score=80.0))
+    await db.commit()
+    recorder = install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON)
+
+    first = await claude.get_or_create_daily_briefing(user, db)
+    second = await claude.get_or_create_daily_briefing(user, db)
+
+    assert recorder["create_calls"] == 1  # generated once, reused thereafter
+    assert second.id == first.id
+
+
+async def test_daily_briefing_no_data_skips_api_call(
+    client: AsyncClient, auth_headers: dict, monkeypatch
+):
+    """With nothing connected, return a 'connect your devices' briefing for free."""
+    recorder = install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON)
+
+    resp = await client.get("/ai/daily-briefing", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert "Connect" in resp.json()["state"]
+    assert recorder.get("create_calls", 0) == 0  # no Claude call made
+
+
+async def test_daily_briefing_requires_auth(client: AsyncClient):
+    resp = await client.get("/ai/daily-briefing")
+    assert resp.status_code in (401, 403)
+
+
+async def test_daily_briefing_is_per_user(
+    client: AsyncClient, auth_headers: dict, db: AsyncSession, user: User, monkeypatch
+):
+    """User A must never receive user B's stored briefing."""
+    user_b = User(email="b@example.com", hashed_password=hash_password("pass"))
+    db.add(user_b)
+    await db.commit()
+    await db.refresh(user_b)
+    db.add(DailyBriefing(
+        user_id=user_b.id,
+        date=date.today(),
+        content_json='{"recovery": "B-ONLY", "state": "B-ONLY", "recommended_workout": "B-ONLY"}',
+    ))
+    await db.commit()
+
+    install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON)
+    # User A has no data → gets the no-data briefing, never B's row.
+    resp = await client.get("/ai/daily-briefing", headers=auth_headers)
+    assert resp.status_code == 200
+    assert "B-ONLY" not in resp.text
+
+
+async def test_daily_briefing_returns_503_when_unconfigured(
+    client: AsyncClient, auth_headers: dict, db: AsyncSession, user: User, monkeypatch
+):
+    """Has data (so it would call Claude) but no API key → 503."""
+    db.add(RecoveryScore(user_id=user.id, date=date(2026, 6, 3), whoop_recovery_score=80.0))
+    await db.commit()
+    monkeypatch.setattr(claude.settings, "anthropic_api_key", "")
+    resp = await client.get("/ai/daily-briefing", headers=auth_headers)
     assert resp.status_code == 503

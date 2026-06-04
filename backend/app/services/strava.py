@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.security import decrypt_token, encrypt_token
 from app.models.user import User
 from app.models.workout import Workout
+from app.services.workout_match import find_cross_source_duplicate, merge_into, parse_start
 
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
@@ -124,17 +125,28 @@ async def sync_activities(user: User, db: AsyncSession) -> int:
         if existing:
             continue
 
-        workout = Workout(
-            user_id=user.id,
-            strava_id=strava_id,
-            source="strava",
-            type=activity.get("sport_type") or activity.get("type"),
-            date=date.fromisoformat(activity["start_date_local"][:10]),
-            duration_seconds=activity.get("moving_time"),
-            distance_meters=activity.get("distance"),
-            avg_hr=activity.get("average_heartrate"),
-        )
-        db.add(workout)
+        # Use start_date (UTC) for matching; start_date_local is for the display
+        # date. Falling back to local keeps tests/fixtures that only set one.
+        started_at = parse_start(activity.get("start_date") or activity.get("start_date_local"))
+        fields = {
+            "strava_id": strava_id,
+            "type": activity.get("sport_type") or activity.get("type"),
+            "date": date.fromisoformat(activity["start_date_local"][:10]),
+            "started_at": started_at,
+            "duration_seconds": activity.get("moving_time"),
+            "distance_meters": activity.get("distance"),
+            "avg_hr": activity.get("average_heartrate"),
+        }
+
+        # If WHOOP already recorded this same session, merge into that row rather
+        # than creating a second one. merge_into links both ids and marks it
+        # source="both".
+        match = await find_cross_source_duplicate(db, user.id, started_at, "strava")
+        if match is not None:
+            merge_into(match, fields, "strava")
+            continue
+
+        db.add(Workout(user_id=user.id, source="strava", **fields))
         synced += 1
 
     await db.commit()
