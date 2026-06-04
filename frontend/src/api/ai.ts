@@ -1,4 +1,9 @@
-import { request } from "@/lib/http";
+import { request, streamRequest } from "@/lib/http";
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 
 export const aiApi = {
   insights: (question: string) =>
@@ -6,6 +11,11 @@ export const aiApi = {
       method: "POST",
       body: JSON.stringify({ question }),
     }),
+
+  // Streaming, multi-turn chat. Send the whole history each turn (that's how
+  // the model "remembers"); onText fires for every token chunk as it streams.
+  streamChat: (messages: ChatMessage[], onText: (text: string) => void) =>
+    streamRequest("/ai/chat", { messages }, onText),
 
   generatePlan: (weekStart: string) =>
     request<{ id: number; plan_json: string; week_start: string }>("/ai/training-plan", {
