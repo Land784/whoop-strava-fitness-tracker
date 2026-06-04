@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import encrypt_token
 from app.models.recovery import RecoveryScore
 from app.models.user import User
+from app.models.workout import Workout
 from app.services import whoop
 
 
@@ -146,3 +147,56 @@ async def test_sync_refreshes_on_401(db: AsyncSession, user: User, monkeypatch):
 async def test_sync_requires_connection(db: AsyncSession, user: User):
     with pytest.raises(ValueError):
         await whoop.sync_recovery(user, db)
+
+
+# ── workouts ──────────────────────────────────────────────────────────────────
+
+WORKOUTS = {
+    "records": [
+        {
+            "id": "wk-1", "score_state": "SCORED", "sport_name": "running",
+            "start": "2026-06-03T12:00:00.000Z", "end": "2026-06-03T12:45:00.000Z",
+            "score": {"average_heart_rate": 152, "distance_meter": 8000.0, "strain": 12.3},
+        },
+        {
+            "id": "wk-2", "score_state": "PENDING_SCORE", "sport_name": "weightlifting",
+            "start": "2026-06-02T18:00:00.000Z", "end": "2026-06-02T19:00:00.000Z", "score": {},
+        },
+    ]
+}
+
+
+async def test_sync_workouts_inserts_scored_skips_unscored(
+    db: AsyncSession, user: User, monkeypatch
+):
+    user.whoop_access_token = encrypt_token("wtok")
+    await db.commit()
+
+    recorder: dict = {}
+    routes = [["GET", "/activity/workout", [FakeResp(200, WORKOUTS)]]]
+    monkeypatch.setattr(whoop.httpx, "AsyncClient", _factory(routes, recorder))
+
+    # Only the SCORED workout is inserted.
+    assert await whoop.sync_workouts(user, db) == 1
+    assert recorder["auth"][0] == "Bearer wtok"
+
+    row = (
+        await db.execute(select(Workout).where(Workout.user_id == user.id))
+    ).scalar_one()
+    assert row.source == "whoop"
+    assert row.whoop_id == "wk-1"
+    assert row.type == "Running"  # sport_name title-cased
+    assert row.duration_seconds == 2700  # 45 min from start/end
+    assert row.distance_meters == 8000.0
+    assert row.avg_hr == 152
+
+
+async def test_sync_workouts_skips_duplicates(db: AsyncSession, user: User, monkeypatch):
+    user.whoop_access_token = encrypt_token("wtok")
+    await db.commit()
+
+    routes = [["GET", "/activity/workout", [FakeResp(200, WORKOUTS)]]]
+    monkeypatch.setattr(whoop.httpx, "AsyncClient", _factory(routes, {}))
+
+    assert await whoop.sync_workouts(user, db) == 1
+    assert await whoop.sync_workouts(user, db) == 0  # upsert by whoop_id

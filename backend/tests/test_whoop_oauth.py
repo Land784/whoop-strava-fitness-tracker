@@ -56,6 +56,7 @@ async def test_whoop_callback_valid_state_connects(
 
     monkeypatch.setattr(whoop_svc, "exchange_code", fake_exchange)
     monkeypatch.setattr(whoop_svc, "sync_recovery", fake_sync)
+    monkeypatch.setattr(whoop_svc, "sync_workouts", fake_sync)
 
     state = create_state_token(user.id, "whoop")
     resp = await client.get(
