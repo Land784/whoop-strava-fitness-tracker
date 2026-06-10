@@ -66,29 +66,37 @@ def authorize_url(state: str) -> str:
     return f"{_base()}/v2/oauth2/login?{query}"
 
 
-def _to_naive_utc(dt: datetime) -> datetime:
-    """Normalise any datetime to naive UTC.
+def _to_aware_utc(dt: datetime) -> datetime:
+    """Normalise any datetime to tz-AWARE UTC.
 
-    We store glucose timestamps as naive UTC to match Workout.started_at, so the
-    later window join compares like-for-like. A value read back from Postgres may
-    arrive timezone-aware; this collapses both cases to a single representation.
+    We store glucose timestamps as aware UTC to match Workout.started_at, so the
+    later window join compares like-for-like. This matters because system_time is
+    a Postgres `timestamptz`: the async driver (asyncpg) interprets a *naive*
+    datetime parameter in the server PROCESS's local timezone, silently shifting
+    a naive "UTC" value by the host's offset (e.g. storing 12:00 as 17:00 on a
+    US/Eastern host). Pinning everything to aware UTC removes that ambiguity. A
+    value with no offset is assumed UTC; an offset value is converted to UTC.
     """
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _parse_system_time(raw: str) -> datetime:
-    """Parse Dexcom's `systemTime` (UTC) into naive UTC.
+    """Parse Dexcom's `systemTime` (UTC) into tz-aware UTC.
 
     Dexcom usually returns systemTime without an offset (it's UTC by definition),
     but we defensively handle a trailing 'Z' or explicit offset too."""
-    return _to_naive_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+    return _to_aware_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
 
 
 def _fmt(dt: datetime) -> str:
-    """Format a datetime for Dexcom's startDate/endDate (no timezone suffix)."""
-    return _to_naive_utc(dt).strftime("%Y-%m-%dT%H:%M:%S")
+    """Format a datetime for Dexcom's startDate/endDate.
+
+    Dexcom's EGV endpoint wants a UTC wall-clock timestamp with NO offset suffix,
+    so we convert to UTC and drop the zone in the string only (the in-process
+    values stay aware UTC — see _to_aware_utc)."""
+    return _to_aware_utc(dt).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 async def exchange_code(code: str, user: User, db: AsyncSession) -> None:
@@ -168,7 +176,7 @@ async def sync_glucose(user: User, db: AsyncSession) -> int:
         raise ValueError("User has not connected Dexcom")
 
     token = decrypt_token(user.dexcom_access_token)
-    now = _to_naive_utc(datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)  # aware UTC; all window math stays aware
 
     # Where to start: full backfill on first sync, else overlap-before-latest.
     latest = (
@@ -181,7 +189,9 @@ async def sync_glucose(user: User, db: AsyncSession) -> int:
     if latest is None:
         start = now - timedelta(days=BACKFILL_DAYS)
     else:
-        start = _to_naive_utc(latest) - timedelta(hours=OVERLAP_HOURS)
+        # `latest` is aware on Postgres but naive on SQLite (the test DB has no
+        # real tz type) — normalise so the subtraction below never mixes the two.
+        start = _to_aware_utc(latest) - timedelta(hours=OVERLAP_HOURS)
 
     synced = 0
     chunk_start = start

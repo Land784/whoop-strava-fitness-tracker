@@ -27,20 +27,39 @@ MATCH_WINDOW = timedelta(minutes=5)
 
 
 def parse_start(iso: str | None) -> datetime | None:
-    """Parse a provider timestamp into a naive-UTC datetime.
+    """Parse a provider timestamp into a tz-AWARE UTC datetime.
 
-    We normalise to naive UTC (tz-aware converted to UTC, then tzinfo dropped)
-    so every started_at is directly comparable regardless of the source's
-    timezone — and so comparisons behave the same on Postgres and SQLite (the
-    latter doesn't preserve tz). Strava's `start_date` and WHOOP's `start` are
-    both UTC, so this keeps them on the same clock.
+    The workouts.started_at column is `DateTime(timezone=True)` -> Postgres
+    `timestamptz`. The async driver (asyncpg) interprets a *naive* datetime
+    parameter in the server PROCESS's local timezone — so a naive "UTC" value
+    silently shifts by the host's UTC offset (e.g. 4h on a US/Eastern host),
+    which throws the dedup time-window off and stores the wrong instant.
+    Returning an explicit UTC-aware datetime pins the instant unambiguously, no
+    matter where the process runs. Strava's `start_date` and WHOOP's `start`
+    are both UTC; a value that arrives without an offset is assumed UTC.
     """
     if not iso:
         return None
     # Python 3.11+ parses a trailing 'Z', but normalise it for safety.
     dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)  # no offset given -> assume UTC
+    return dt.astimezone(timezone.utc)  # normalise any offset to UTC
+
+
+def _as_naive_utc(dt: datetime) -> datetime:
+    """Coerce a datetime to naive-UTC so two values are always comparable.
+
+    started_at values are tz-aware UTC going in (see parse_start), but the value
+    that comes *back* depends on the backend: Postgres (`timestamptz`) returns
+    tz-AWARE datetimes, while SQLite (the test DB) has no real tz type and
+    returns naive ones. Subtracting a naive value from an aware one raises
+    TypeError — only on real Postgres, which is why the SQLite test suite never
+    caught it. Normalising both sides here makes the arithmetic behave
+    identically on both backends.
+    """
     if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 
@@ -113,7 +132,11 @@ async def find_cross_source_duplicate(
     ).scalars().all()
     if not rows:
         return None
-    return min(rows, key=lambda w: abs((w.started_at - started_at).total_seconds()))
+    target = _as_naive_utc(started_at)
+    return min(
+        rows,
+        key=lambda w: abs((_as_naive_utc(w.started_at) - target).total_seconds()),
+    )
 
 
 def merge_into(existing: Workout, incoming: dict, incoming_source: str) -> None:
@@ -174,15 +197,20 @@ async def merge_existing_duplicates(db: AsyncSession, user_id: int) -> int:
     for s in strava_rows:
         # Nearest unused WHOOP row within the match window (same policy as the
         # insert-time matcher) — start time alone is a strong enough signal.
+        s_start = _as_naive_utc(s.started_at)
         candidates = [
             w
             for w in whoop_rows
             if w.id not in used
-            and abs((w.started_at - s.started_at).total_seconds()) <= MATCH_WINDOW.total_seconds()
+            and abs((_as_naive_utc(w.started_at) - s_start).total_seconds())
+            <= MATCH_WINDOW.total_seconds()
         ]
         if not candidates:
             continue
-        w = min(candidates, key=lambda x: abs((x.started_at - s.started_at).total_seconds()))
+        w = min(
+            candidates,
+            key=lambda x: abs((_as_naive_utc(x.started_at) - s_start).total_seconds()),
+        )
 
         # Capture the WHOOP fields into a plain dict, then delete + flush the
         # WHOOP row BEFORE merge_into reassigns its whoop_id to the Strava row.
