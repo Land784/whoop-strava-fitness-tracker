@@ -14,6 +14,11 @@ export const authApi = {
       body: JSON.stringify({ email, password }),
     }),
 
+  // The current user, resolved from the stored JWT. The app calls this on boot
+  // to confirm the token is still valid (a 401 means it expired) and to get the
+  // real user record — never a locally-faked one.
+  me: () => request<User>("/auth/me"),
+
   // Which providers the current user has connected (booleans, no tokens).
   getConnections: () => request<ConnectionStatus>("/auth/connections"),
 

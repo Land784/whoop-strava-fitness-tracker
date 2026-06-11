@@ -49,6 +49,21 @@ async def login(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     return Token(access_token=create_access_token(str(user.id)))
 
 
+@router.get("/me", response_model=UserOut)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user.
+
+    This is the frontend's source of truth for "am I logged in?". On boot the
+    client has a JWT in localStorage but can't tell whether it's still valid
+    (JWTs are stateless — they carry their own expiry, but the browser doesn't
+    check it). It calls this endpoint with the token: a 200 confirms the session
+    is live and hands back the real user; a 401 means the token is missing or
+    expired, so the client clears it and shows the login page. That replaces the
+    old approach of trusting a never-expiring `user` blob cached in localStorage.
+    """
+    return current_user
+
+
 @router.get("/connections", response_model=ConnectionStatus)
 async def get_connections(current_user: User = Depends(get_current_user)):
     """Report which providers the current user has connected.

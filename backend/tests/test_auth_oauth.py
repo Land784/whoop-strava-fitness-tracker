@@ -69,6 +69,30 @@ async def test_callback_valid_state_connects(
     assert "status=connected" in resp.headers["location"]
 
 
+# ── current user (/auth/me) ─────────────────────────────────────────────────────
+# The frontend hits this on boot to validate a stored token. We test the two
+# branches that drive that logic: a valid token returns the user; a missing
+# token is rejected (so the client knows to clear the session and show login).
+
+async def test_me_requires_auth(client: AsyncClient):
+    resp = await client.get("/auth/me")
+    # HTTPBearer returns 403 when the Authorization header is absent.
+    assert resp.status_code in (401, 403)
+
+
+async def test_me_returns_current_user(
+    client: AsyncClient, auth_headers: dict, user: User
+):
+    resp = await client.get("/auth/me", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == user.id
+    assert body["email"] == user.email
+    # Tokens must never leak through a user-facing response.
+    assert "hashed_password" not in body
+    assert "strava_access_token" not in body
+
+
 # ── connections status ────────────────────────────────────────────────────────
 
 async def test_connections_requires_auth(client: AsyncClient):

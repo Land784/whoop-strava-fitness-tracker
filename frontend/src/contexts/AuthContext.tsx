@@ -1,6 +1,7 @@
 "use client";
 
 import { authApi } from "@/api/auth";
+import { AUTH_LOGOUT_EVENT } from "@/lib/http";
 import type { User } from "@/types";
 import { useRouter } from "next/navigation";
 import {
@@ -23,29 +24,44 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  // `loading` stays true until we've *validated* the stored token against the
+  // server. We never render the app as "logged in" off a cached blob — that was
+  // the old bug: a stale `user` in localStorage outlived its 60-min JWT, so the
+  // dashboard showed a logged-in shell whose every request silently 401'd.
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  // On boot, ask the server who we are. The JWT is the only real credential;
+  // localStorage can't tell us if it's expired, so /auth/me is the source of
+  // truth. 200 → set the real user; any failure (401 = expired/invalid) → clear
+  // the session. Either way we stop loading so the UI can resolve.
   useEffect(() => {
-    const stored = localStorage.getItem("user");
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem("user");
-      }
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+    authApi
+      .me()
+      .then((me) => {
+        setUser(me);
+        localStorage.setItem("user", JSON.stringify(me));
+      })
+      .catch(() => {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("user");
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const token = await authApi.login(email, password);
     localStorage.setItem("access_token", token.access_token);
-    // Store minimal user info locally — a /users/me endpoint would be the
-    // proper source of truth once you build the users router
-    const userData: User = { id: 0, email, created_at: new Date().toISOString() };
-    localStorage.setItem("user", JSON.stringify(userData));
-    setUser(userData);
+    // Fetch the *real* user with the fresh token instead of fabricating one.
+    const me = await authApi.me();
+    localStorage.setItem("user", JSON.stringify(me));
+    setUser(me);
     router.push("/dashboard");
   }, [router]);
 
@@ -64,6 +80,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     router.push("/login");
   }, [router]);
+
+  // When any API call hits a 401 with a token attached (session expired while
+  // the app was open), http.ts fires AUTH_LOGOUT_EVENT. We catch it here and run
+  // the same teardown as a manual logout, so a dead token bounces the user to
+  // /login instead of leaving them on a broken page.
+  useEffect(() => {
+    const onLogout = () => logout();
+    window.addEventListener(AUTH_LOGOUT_EVENT, onLogout);
+    return () => window.removeEventListener(AUTH_LOGOUT_EVENT, onLogout);
+  }, [logout]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout }}>
