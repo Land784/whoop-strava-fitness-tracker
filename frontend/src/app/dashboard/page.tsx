@@ -67,6 +67,10 @@ export default function DashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["recovery"] });
+      // The briefing is derived from the data we just synced, so refetch it too.
+      // invalidateQueries forces a refetch even though staleTime is Infinity; the
+      // backend only spends a Claude call if the sync actually brought new data.
+      queryClient.invalidateQueries({ queryKey: ["daily-briefing"] });
     },
   });
 

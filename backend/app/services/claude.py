@@ -21,6 +21,7 @@ from app.models.training_plan import TrainingPlan
 from app.models.user import User
 from app.models.workout import Workout
 from app.services.glucose import summarize_workout_glucose
+from app.services.workout_match import _as_naive_utc
 
 # How many prior turns of a conversation we feed back to Claude. Bounds the
 # token cost (and latency) of a long chat — older turns drop off the front.
@@ -283,12 +284,47 @@ def _parse_briefing(raw: str) -> dict[str, str]:
     return {"recovery": "—", "state": text or "—", "recommended_workout": "—"}
 
 
-async def get_or_create_daily_briefing(user: User, db: AsyncSession) -> DailyBriefing:
-    """Return today's dashboard briefing, generating it once if it doesn't exist.
+async def _latest_data_timestamp(user: User, db: AsyncSession) -> datetime | None:
+    """The most recent `created_at` across the user's workouts and recovery rows.
 
-    This is the "load once per day" core: the first call of the day makes one
-    Claude request and stores the result; every later call (later page loads,
-    re-logins) reads that stored row and makes no API call at all.
+    This is the freshness signal for the daily briefing. A sync inserts rows
+    stamped with the current time, so if the newest such row is later than the
+    briefing we already generated, there's new data worth re-briefing on. Returns
+    None when the user has no data at all (nothing synced yet).
+    """
+    latest_workout = (
+        await db.execute(
+            select(Workout.created_at)
+            .where(Workout.user_id == user.id)
+            .order_by(Workout.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    latest_recovery = (
+        await db.execute(
+            select(RecoveryScore.created_at)
+            .where(RecoveryScore.user_id == user.id)
+            .order_by(RecoveryScore.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    stamps = [t for t in (latest_workout, latest_recovery) if t is not None]
+    # Normalise before max(): timestamptz comes back tz-aware on Postgres but
+    # naive on the SQLite test DB, and the two can't be compared. See
+    # _as_naive_utc (the same footgun that bit the workout dedup).
+    return max(stamps, key=_as_naive_utc) if stamps else None
+
+
+async def get_or_create_daily_briefing(user: User, db: AsyncSession) -> DailyBriefing:
+    """Return today's dashboard briefing, regenerating it when new data arrives.
+
+    The original contract was "one Claude call per user per day". We relax it
+    slightly so the card actually reflects what you've synced: today's row is
+    reused on every page load UNTIL a newer workout or recovery row appears (i.e.
+    you synced something new), at which point the next load regenerates the
+    briefing *in place*. Cost is therefore bounded by data changes, not page
+    views — at most a handful of Sonnet calls a day.
     """
     today = date.today()
 
@@ -300,25 +336,26 @@ async def get_or_create_daily_briefing(user: User, db: AsyncSession) -> DailyBri
             )
         )
     ).scalar_one_or_none()
-    if existing is not None:
-        return existing
 
-    recovery = (
-        await db.execute(
-            select(RecoveryScore).where(RecoveryScore.user_id == user.id).limit(1)
-        )
-    ).scalars().all()
-    workouts = (
-        await db.execute(
-            select(Workout).where(Workout.user_id == user.id).limit(1)
-        )
-    ).scalars().all()
+    latest_data_ts = await _latest_data_timestamp(user, db)
+
+    # Reuse today's briefing unless the user has synced newer data since it was
+    # generated. Both timestamps come from the DB, so comparing them is safe on
+    # either backend once normalised to naive-UTC.
+    if existing is not None:
+        if latest_data_ts is None or _as_naive_utc(latest_data_ts) <= _as_naive_utc(
+            existing.generated_at
+        ):
+            return existing
+        # else: fresh data exists → fall through and regenerate in place below.
 
     # No-data guard: if nothing is connected/synced yet, there's nothing to brief
     # on — so don't spend a Claude call to be told to connect a device. Return a
     # transient (un-persisted) briefing; the moment real data exists, the next
-    # load generates and stores a real one.
-    if not recovery and not workouts:
+    # load generates and stores a real one. (Only reachable when existing is
+    # None — an existing row implies data once existed, handled by the branch
+    # above.)
+    if latest_data_ts is None:
         content = {
             "recovery": "No recovery data yet.",
             "state": "Connect WHOOP and Strava in Settings, then sync.",
@@ -358,6 +395,16 @@ async def get_or_create_daily_briefing(user: User, db: AsyncSession) -> DailyBri
         messages=[{"role": "user", "content": prompt}],
     )
     content = _parse_briefing(message.content[0].text)
+
+    # Regeneration path: today's row already exists but new data made it stale.
+    # Update it in place — the unique (user_id, date) constraint means we reuse
+    # the row rather than inserting a second one for the same day.
+    if existing is not None:
+        existing.content_json = json.dumps(content)
+        existing.generated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(existing)
+        return existing
 
     briefing = DailyBriefing(
         user_id=user.id,

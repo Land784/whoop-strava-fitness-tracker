@@ -377,6 +377,43 @@ async def test_daily_briefing_is_cached_after_first_generation(
     assert second.id == first.id
 
 
+BRIEFING_JSON_2 = (
+    '{"recovery": "Lighter recovery after that late session.", '
+    '"state": "Balanced", '
+    '"recommended_workout": "Easy 30-min spin."}'
+)
+
+
+async def test_daily_briefing_regenerates_when_newer_data_synced(
+    db: AsyncSession, user: User, monkeypatch
+):
+    """Syncing data newer than today's briefing regenerates it in place.
+
+    This is the fix for "the dashboard summary never updates after a sync": the
+    briefing is reused until newer workout/recovery data appears, then rewritten.
+    """
+    rec = RecoveryScore(user_id=user.id, date=date(2026, 6, 3), whoop_recovery_score=80.0)
+    db.add(rec)
+    await db.commit()
+
+    install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON)
+    first = await claude.get_or_create_daily_briefing(user, db)
+    assert "Primed" in first.content_json
+
+    # Simulate a later sync by stamping the data as arriving after the briefing.
+    rec.created_at = first.generated_at + timedelta(hours=1)
+    await db.commit()
+
+    # Re-arm the fake with a *different* reply so we can prove the row was rewritten.
+    recorder2 = install_fake_anthropic(monkeypatch, reply=BRIEFING_JSON_2)
+    second = await claude.get_or_create_daily_briefing(user, db)
+
+    assert recorder2["create_calls"] == 1   # a fresh Claude call happened
+    assert second.id == first.id            # same daily row, updated in place
+    assert "Balanced" in second.content_json
+    assert "Primed" not in second.content_json
+
+
 async def test_daily_briefing_no_data_skips_api_call(
     client: AsyncClient, auth_headers: dict, monkeypatch
 ):
