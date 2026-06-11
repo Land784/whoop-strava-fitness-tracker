@@ -11,6 +11,27 @@ function getToken(): string | null {
   return localStorage.getItem("access_token");
 }
 
+/**
+ * Custom event name the app listens for to force a logout. We dispatch it from
+ * here (the one place every request flows through) the moment the server
+ * rejects a token we *did* send — i.e. the session expired mid-use. http.ts
+ * stays route-agnostic: it just fires the event; AuthContext owns the actual
+ * "clear storage + navigate to /login" reaction. This is the loose-coupling
+ * trick for letting a non-React module talk to React without importing it.
+ */
+export const AUTH_LOGOUT_EVENT = "auth:logout";
+
+/**
+ * Only signal a logout when the 401 is for a request that *carried* a token.
+ * A 401 from /auth/login (no token attached) means "wrong password" — that
+ * should surface as an error on the form, not bounce the user to /login.
+ */
+function handleUnauthorized(hadToken: boolean) {
+  if (hadToken && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
+  }
+}
+
 export async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -23,6 +44,8 @@ export async function request<T>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+
+  if (res.status === 401) handleUnauthorized(token !== null);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -55,6 +78,8 @@ export async function streamRequest(
     },
     body: JSON.stringify(body),
   });
+
+  if (res.status === 401) handleUnauthorized(token !== null);
 
   if (!res.ok || !res.body) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
